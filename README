@@ -17,6 +17,8 @@ Things to add in the assembler:
 
 CL-style macros?  (that would be cool!)
 Checking ranges of types, signed indices, etc.
+Support for later chips in the m68k line, and enabling/disabling
+	allowance of their added instructions.
 
 
 Things to add in the linker:
