@@ -1,0 +1,27 @@
+
+The goal of this assembler is to eventually not be simply an M68K
+assembler, but to be relatively easily retargetable.  Also, this
+assembler should be callable from other CL applications, as well as
+executable as a stand-alone program.
+
+
+Things to add in the grammar/parser/lexer:
+
+Support for ' (single ASCII character?) -- only because the
+	book I have says it's part of Motorola's standard.  Should it
+	behave like double-quotes or what?
+Macro characters -- < > \ @.
+
+
+Things to add in the assembler:
+
+CL-style macros?  (that would be cool!)
+Checking ranges of types, signed indices, etc.
+
+
+Things to add in the linker:
+
+uh, the whole linker. ;-)
+Atari ST bootfloppy target.
+Atari ST PRG target.
+linker scripts.
