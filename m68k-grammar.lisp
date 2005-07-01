@@ -6,6 +6,7 @@
 (defparameter *m68k-asm-grammar*
   '(;; OPERAND
     line ((label)
+	  (label operation)
 	  (label operation operands)
 	  (operation)
 	  (operation operands))
@@ -48,9 +49,13 @@
 
     ;; EXPRESSIONS
 
-    expression ((term)
-		(expression adding-operator term))
-    adding-operator ((+) (-) (<<) (>>) (^) (or) (&))
+    expression ((term2)
+		(expression adding-operator term2))
+    adding-operator ((+) (-))
+
+    term2 ((term)
+	   (term2 bitwise-operator term))
+    bitwise-operator ((<<) (>>) (^) (or) (&))
 
     term ((factor)
 	  (term multiplying-operator factor))

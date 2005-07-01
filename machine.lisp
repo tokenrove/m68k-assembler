@@ -10,10 +10,10 @@
   ;; masks, or functions.  these are matched or called in sequence,
   ;; until one can be found which matches.
   ;;
-  ;; Code generation masks are lists in the form:
-  ;;  (size code) where size indicates the number of bits this part
-  ;;  should take up, and code is the code to evaluate when generating
-  ;;  this part of the expression.
+  ;; Code generation masks are lists in the form: (size code) where
+  ;;  size indicates the number of bits this part should take up, and
+  ;;  code is the code to evaluate when generating this part of the
+  ;;  expression.  (Actually, code should be a function call, now.)
   ;; The list starts from the most significant bit of the instruction
   ;; word and moves down.  SIZE fields of ? indicate a variable size,
   ;; where the code in question will return a suitable size value as a
@@ -39,13 +39,13 @@
 	      (3 (register-idx second-operand)) (1 #b1)
 	      (2 (modifier-bits modifier))
 	      (6 (effective-address-mode first-operand))
-	      (? (effective-address-extra first-operand))))
+	      (? (effective-address-extra first-operand modifier))))
 	    (((byte word long) (data-register) (memory-alterable-modes))
 	     ((4 ,(if (string= x "ADD") #b1101 #b1001))
 	      (3 (register-idx first-operand)) (1 #b0)
 	      (2 (modifier-bits modifier))
 	      (6 (effective-address-mode second-operand))
-	      (? (effective-address-extra second-operand))))
+	      (? (effective-address-extra second-operand modifier))))
 	    ,(concatenate 'string x "A")
 	    ,(concatenate 'string x "I")
 	    ,(concatenate 'string x "Q")
@@ -54,23 +54,23 @@
 	    (((word long) (all-ea-modes) (address-register))
 	     ((4 ,(if (string= x "ADD") #b1101 #b1001))
 	      (3 (register-idx second-operand))
-	      (1 (if (eql modifier 'word) 0 1))
+	      (1 (if-eql-word-p modifier 0 1))
 	      (2 #b11) (6 (effective-address-mode first-operand))
-	      (? (effective-address-extra first-operand)))))
+	      (? (effective-address-extra first-operand modifier)))))
 	   (,(concatenate 'string x "I")
 	    (((byte word long) (immediate) (data-alterable-modes))
 	     ((8 ,(if (string= x "ADD") #b00000110 #b00000100))
 	      (2 (modifier-bits modifier))
 	      (6 (effective-address-mode second-operand))
 	      (? (immediate-value first-operand modifier))
-	      (? (effective-address-extra second-operand)))))
+	      (? (effective-address-extra second-operand modifier)))))
 	   (,(concatenate 'string x "Q")
 	    (((byte word long) (immediate (<= 1 value 8)) (alterable-modes))
 	     ((4 #b0101) (3 (immediate-value first-operand))
 	      (1 ,(if (string= x "ADD") 0 1))
 	      (2 (modifier-bits modifier))
 	      (6 (effective-address-mode second-operand))
-	      (? (effective-address-extra second-operand)))))
+	      (? (effective-address-extra second-operand modifier)))))
 	   (,(concatenate 'string x "X")
 	    (((byte word long) (data-register) (data-register))
 	     ((4 ,(if (string= x "ADD") #b1101 #b1001))
@@ -90,18 +90,18 @@
 	      `((((byte word long) (data-addressing-modes) (data-register))
 		 ((4 ,(cond ((string= x "AND") #b1100)
 			    ((string= x "OR") #b1000)))
-		  (3 (register-idx second-operand)) (1 #b1)
+		  (3 (register-idx second-operand)) (1 #b0)
 		  (2 (modifier-bits modifier))
 		  (6 (effective-address-mode first-operand))
-		  (? (effective-address-extra first-operand))))))
+		  (? (effective-address-extra first-operand modifier))))))
 	    (((byte word long) (data-register) (memory-alterable-modes))
 	     ((4 ,(cond ((string= x "AND") #b1100)
 			((string= x "EOR") #b1011)
 			((string= x "OR") #b1000)))
-	      (3 (register-idx second-operand)) (1 #b0)
+	      (3 (register-idx first-operand)) (1 #b1)
 	      (2 (modifier-bits modifier))
-	      (6 (effective-address-mode first-operand))
-	      (? (effective-address-extra first-operand))))
+	      (6 (effective-address-mode second-operand))
+	      (? (effective-address-extra second-operand modifier))))
 	    ,(concatenate 'string x "I"))
 	   (,(concatenate 'string x "I")
 	    (((byte word long) (immediate) (data-alterable-modes))
@@ -112,7 +112,7 @@
 	      (2 (modifier-bits modifier))
 	      (6 (effective-address-mode second-operand))
 	      (? (immediate-value first-operand modifier))
-	      (? (effective-address-extra second-operand))))
+	      (? (effective-address-extra second-operand modifier))))
 	    (((byte) (immediate) (register (string-equal value "CCR")))
 	     ((4 #b0000)
 	      (4 ,(cond ((string= x "AND") #b0010)
@@ -158,7 +158,7 @@
 		       (t #b11)))
 	     (1 ,(if (string= x "L" :start1 (1- (length x))) 1 0))
 	     (2 #b11) (6 (effective-address-mode first-operand))
-	     (? (effective-address-extra first-operand))))))
+	     (? (effective-address-extra first-operand modifier))))))
        '("ASL" "ASR" "LSL" "LSR" "ROL" "ROR" "ROXL" "ROXR"))
 
     ,@(mapcar
@@ -179,19 +179,19 @@
 	    ((4 #b0000) (3 (register-idx first-operand))
 	     (1 #b1) (2 ,(cdr x))
 	     (6 (effective-address-mode second-operand))
-	     (? (effective-address-extra second-operand))))
+	     (? (effective-address-extra second-operand modifier))))
 	   (((byte long) (immediate) (data-alterable-modes))
 	    ((8 #b00001000) (2 ,(cdr x))
 	     (6 (effective-address-mode second-operand))
 	     (8 #b00000000) (8 (immediate-value immediate 'byte))
-	     (? (effective-address-extra second-operand))))))
+	     (? (effective-address-extra second-operand modifier))))))
        '(("BCHG" . #b01) ("BCLR" . #b10) ("BSET" . #b11) ("BTST" . #b00)))
 
     ("CHK"
      (((word) (data-addressing-modes) (data-register))
       ((4 #b0100) (3 (register-idx second-operand)) (3 #b110)
        (6 (effective-address-mode first-operand))
-       (? (effective-address-extra first-operand)))))
+       (? (effective-address-extra first-operand modifier)))))
     
     ,@(mapcar
        (lambda (x)
@@ -203,8 +203,8 @@
 		       ((string= x "NEGX") #b000)
 		       ((string= x "CLR") #b010)))
 	     (2 (modifier-bits modifier))
-	     (6 (effective-address-modes first-operand))
-	     (? (effective-address-extra first-operand))))))
+	     (6 (effective-address-mode first-operand))
+	     (? (effective-address-extra first-operand modifier))))))
        '("CLR" "NEG" "NEGX" "NOT"))
 
     ("CMP"
@@ -212,20 +212,20 @@
       ((4 #b1011) (3 (register-idx second-operand)) (1 #b0)
        (2 (modifier-bits modifier))
        (6 (effective-address-mode first-operand))
-       (? (effective-address-extra first-operand))))
+       (? (effective-address-extra first-operand modifier))))
      "CMPA" "CMPI" "CMPM")
     ("CMPA"
      (((word long) (all-ea-modes) (address-register))
       ((4 #b1011) (3 (register-idx second-operand))
-       (3 (if (eql modifier 'word) #b011 #b111))
+       (3 (if-eql-word-p modifier #b011 #b111))
        (6 (effective-address-mode first-operand))
-       (? (effective-address-extra first-operand)))))
+       (? (effective-address-extra first-operand modifier)))))
     ("CMPI"
      (((byte word long) (immediate) (data-alterable-modes))
       ((8 #b00001100) (2 (modifier-bits modifier))
        (6 (effective-address-mode second-operand))
        (? (immediate-value first-operand modifier))
-       (? (effective-address-extra second-operand)))))
+       (? (effective-address-extra second-operand modifier)))))
     ("CMPM"
      (((byte word long) (postincrement-indirect) (postincrement-indirect))
       ((4 #b1011) (3 (register-idx second-operand))
@@ -256,7 +256,7 @@
 	     (3 ,(if (or (string= x "DIVS") (string= x "MULS"))
 		     #b111 #b011))
 	     (6 (effective-address-mode first-operand))
-	     (? (effective-address-extra first-operand))))))
+	     (? (effective-address-extra first-operand modifier))))))
        '("DIVS" "DIVU" "MULS" "MULU"))
 
     ("EXG"
@@ -272,7 +272,7 @@
 
     ("EXT"
      (((word long) (data-register))
-      ((7 #b0100100) (3 (if (eql modifier 'word) #b010 #b011))
+      ((7 #b0100100) (3 (if-eql-word-p modifier #b010 #b011))
        (3 #b000) (3 (register-idx first-operand)))))
 
     ("ILLEGAL" (nil ((16 #b0100101011111100))))
@@ -280,17 +280,17 @@
     ("JMP"
      ((nil (control-addressing-modes))
       ((10 #b0100111011) (6 (effective-address-mode first-operand))
-       (? (effective-address-extra first-operand)))))
+       (? (effective-address-extra first-operand modifier)))))
     ("JSR"
      ((nil (control-addressing-modes))
       ((10 #b0100111010) (6 (effective-address-mode first-operand))
-       (? (effective-address-extra first-operand)))))
+       (? (effective-address-extra first-operand modifier)))))
 
     ("LEA"
      (((long) (control-addressing-modes) (address-register))
       ((4 #b0100) (3 (register-idx second-operand)) (3 #b111)
-       (6 (effective-address-modes first-operand))
-       (? (effective-address-extra first-operand)))))
+       (6 (effective-address-mode first-operand))
+       (? (effective-address-extra first-operand modifier)))))
 
     ("LINK"
      ((nil (address-register) (immediate))
@@ -298,56 +298,56 @@
        (16 (immediate-value immediate)))))
 
     ("MOVE"
-     (((byte word long) (all-modes) (data-alterable-modes))
+     (((byte word long) (all-ea-modes) (data-alterable-modes))
       ((2 #b00) (2 (modifier-bits modifier))
        (6 (effective-address-mode second-operand :flipped-p t))
        (6 (effective-address-mode first-operand))
-       (? (effective-address-extra first-operand))
-       (? (effective-address-extra second-operand))))
+       (? (effective-address-extra first-operand modifier))
+       (? (effective-address-extra second-operand modifier))))
      (((word) (register (string-equal value "CCR"))
        (data-alterable-modes))
       ((10 #b0100001011) (6 (effective-address-mode second-operand))
-       (? (effective-address-extra second-operand))))
+       (? (effective-address-extra second-operand modifier))))
      (((word) (data-addressing-modes) (register (string-equal value "CCR")))
       ((10 #b0100010011) (6 (effective-address-mode first-operand))
-       (? (effective-address-extra first-operand))))
+       (? (effective-address-extra first-operand modifier))))
      (((word) (data-addressing-modes) (register (string-equal value "SR")))
       ((10 #b0100011011) (6 (effective-address-mode first-operand))
-       (? (effective-address-extra first-operand))))
+       (? (effective-address-extra first-operand modifier))))
      (((word) (register (string-equal value "SR")) (data-alterable-modes))
       ((10 #b0100000011) (6 (effective-address-mode second-operand))
-       (? (effective-address-extra second-operand))))
+       (? (effective-address-extra second-operand modifier))))
      (((long) (register (string-equal value "USP")) (address-register))
       ((13 #b0100111001101) (3 (register-idx second-operand))))
      (((long) (register (string-equal value "USP")) (address-register))
       ((13 #b0100111001101) (3 (register-idx second-operand))))
      "MOVEA" "MOVEQ")
     ("MOVEA"
-     (((word long) (all-modes) (address-register))
+     (((word long) (all-ea-modes) (address-register))
       ((2 #b00) (2 (modifier-bits modifier))
        (3 (register-idx second-operand)) (3 #b001)
        (6 (effective-address-mode first-operand))
-       (? (effective-address-extra first-operand)))))
+       (? (effective-address-extra first-operand modifier)))))
     ("MOVEC") ;; XXX I don't understand the syntax for this one.
     ("MOVEM"
      (((word long) (register-list) (movem-pre-modes))
-      ((9 #b010010001) (1 (if (eql modifier 'word) 0 1))
+      ((9 #b010010001) (1 (if-eql-word-p modifier 0 1))
        (6 (effective-address-mode second-operand))
        (16 (register-list-mask first-operand :flipped-p t))
-       (? (effective-address-extra second-operand))))
+       (? (effective-address-extra second-operand modifier))))
      (((word long) (movem-post-modes) (register-list))
-      ((9 #b010011001) (1 (if (eql modifier 'word) 0 1))
+      ((9 #b010011001) (1 (if-eql-word-p modifier 0 1))
        (6 (effective-address-mode first-operand))
        (16 (register-list-mask second-operand :flipped-p nil))
-       (? (effective-address-extra first-operand)))))
+       (? (effective-address-extra first-operand modifier)))))
     ("MOVEP"
      (((word long) (data-register) (displacement-indirect))
       ((4 #b0000) (3 (register-idx first-operand))
-       (3 (if (eql modifier 'word) #b110 #b111)) (3 #b001)
+       (3 (if-eql-word-p modifier #b110 #b111)) (3 #b001)
        (3 (register-idx (indirect-base-register second-operand)))))
      (((word long) (displacement-indirect) (data-register))
       ((4 #b0000) (3 (register-idx second-operand))
-       (3 (if (eql modifier 'word) #b100 #b101)) (3 #b001)
+       (3 (if-eql-word-p modifier #b100 #b101)) (3 #b001)
        (3 (register-idx (indirect-base-register first-operand))))))
     ("MOVEQ"
      (((long) (immediate (<= 0 value 255)) (data-register))
@@ -357,8 +357,8 @@
 
     ("NBCD"
      (((byte) (data-alterable-modes))
-      ((10 #b0100100000) (6 (effective-address-modes first-operand))
-       (? (effective-address-extra first-operand)))))
+      ((10 #b0100100000) (6 (effective-address-mode first-operand))
+       (? (effective-address-extra first-operand modifier)))))
 
     ("RESET" (nil ((16 #b0100111001110000))))
     ("NOP"   (nil ((16 #b0100111001110001))))
@@ -371,8 +371,8 @@
 
     ("PEA"
      (((long) (control-addressing-modes))
-      ((10 #b0100100001) (6 (effective-address-modes first-operand))
-       (? (effective-address-extra first-operand)))))
+      ((10 #b0100100001) (6 (effective-address-mode first-operand))
+       (? (effective-address-extra first-operand modifier)))))
 
     ,@(mapcar
        (lambda (x)
@@ -392,8 +392,8 @@
 
     ("TAS"
      (((byte) (data-alterable-modes))
-      ((10 #b0100101011) (6 (effective-address-modes first-operand))
-       (? (effective-address-extra first-operand)))))
+      ((10 #b0100101011) (6 (effective-address-mode first-operand))
+       (? (effective-address-extra first-operand modifier)))))
 
     ("TRAP"
      ((nil (immediate (<= 0 value 15)))
@@ -402,8 +402,8 @@
     ("TST"
      (((byte word long) (data-alterable-modes))
       ((8 #b01001010) (2 (modifier-bits modifier))
-       (6 (effective-address-modes first-operand))
-       (? (effective-address-extra first-operand)))))
+       (6 (effective-address-mode first-operand))
+       (? (effective-address-extra first-operand modifier)))))
 
     ("UNLK"
      ((nil (address-register))
@@ -417,3 +417,34 @@
     ("pc") ("ccr") ("sr") ("ssp") ("usp")))
 
 
+;;;; HELPER FUNCTIONS
+
+(defun munge-modifier-and-find-in-table (string table)
+  (let ((modifier nil))
+    (awhen (position #\. string)
+      (setf modifier (subseq string (1+ it)))
+      (setf string (subseq string 0 it)))
+    (awhen (find string table :key #'car :test #'string-equal)
+      (list string modifier))))
+
+(defun register-p (string)
+  (when (string-equal string "sp") (setf string "a7"))
+  (munge-modifier-and-find-in-table string *asm-register-table*))
+
+(defun opcode-p (string)
+  (munge-modifier-and-find-in-table string *asm-opcode-table*))
+
+(defun pseudo-op-p (string)
+  (munge-modifier-and-find-in-table string *asm-pseudo-op-table*))
+
+(defun string-to-modifier (string)
+  (cond ((string-equal string "b") 'byte)
+	((string-equal string "w") 'word)
+	((string-equal string "l") 'long)))
+
+
+;;; Really dumb, but this was the only thing in the code generation
+;;; table that needed to be changed to a function call in order to
+;;; stop using eval in the code generator.
+(defun if-eql-word-p (modifier a b)
+  (if (eql modifier 'word) a b))

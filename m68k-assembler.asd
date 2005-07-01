@@ -7,6 +7,7 @@
   :depends-on (:anaphora)
   :components
   ((:file "package")
+   (:file "machine" :depends-on ("package"))
    (:file "lexer" :depends-on ("package"))
    (:file "parser" :depends-on ("package"))
    (:file "ast" :depends-on ("package"))

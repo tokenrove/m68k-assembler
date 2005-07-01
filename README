@@ -11,6 +11,7 @@ Support for ' (single ASCII character?) -- only because the
 	book I have says it's part of Motorola's standard.  Should it
 	behave like double-quotes or what?
 Macro characters -- < > \ @.
+Support for floats (once FPU instructions are supported).
 
 
 Things to add in the assembler:

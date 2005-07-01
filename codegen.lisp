@@ -52,13 +52,20 @@
   (cond 
     ;; XXX: should try to evaluate expression if it exists.
     ((and (eql (car operand) 'displacement-indirect)
-	  (not (eql (caadr operand) 'expression)))
+	  (zerop (indirect-displacement operand))
+	  (address-register-p (indirect-base-register operand)))
      'vanilla-indirect)
     ((eql (car operand) 'register)
      (case (char (caadr operand) 0)
        ((#\d #\D) 'data-register)
        ((#\a #\A) 'address-register)
        (t 'register)))
+    ;; XXX: not sure if this is reasonable behavior, but it seems ok
+    ;; to me.
+    ((eql (car operand) 'absolute)
+     (if (absolute-definitely-needs-long-p operand)
+	 'absolute-long
+	 'absolute-short))
     (t (car operand))))
 
 (defun operand-type-matches-constraint-type-p (operand constraint)
@@ -101,12 +108,18 @@
 
 ;;;; CODE GENERATION HELPERS
 
+;;; Note that basically anything here wants to work with
+;;; pre-simplified parse trees.
+
 (defun register-idx (operand &key both-sets)
   "If operand is a register or contains in some way a single register,
 returns only the numeric index of that register, and the number of
 bits that takes up, as a second value.  Otherwise, an error is
 signalled."
-  (assert (eql (car operand) 'register))
+  (case (car operand)
+    (register)
+    (t (setf operand (indirect-base-register operand))))
+
   (let ((idx (position (caadr operand) *asm-register-table*
 		       :test #'string-equal :key #'car)))
     (assert (<= 0 idx 15))
@@ -114,32 +127,179 @@ signalled."
 	(values idx 4)
 	(values (logand idx 7) 3))))
 
-(defun indirect-base-register (operand))
-(defun indirect-index-register (operand))
+(defun register-modifier (operand)
+  (assert (eql (car operand) 'register))
+  (cadadr operand))
+
+;;; XXX: naive
+(defun data-register-p (operand)
+  (char-equal (char (caadr operand) 0) #\D))
+(defun address-register-p (operand)
+  (char-equal (char (caadr operand) 0) #\A))
+(defun pc-register-p (operand)
+  (string-equal (caadr operand) "PC"))
+
+(defun indirect-base-register (operand)
+  (find 'register (cdr operand) :key #'carat))
+(defun indirect-index-register (operand)
+  (assert (eql (car operand) 'indexed-indirect))
+  (find 'register (cdr operand) :from-end t :key #'carat))
+(defun indirect-displacement (operand)
+  (cond ((integerp (cadr operand)) (cadr operand))
+	((not (eql (caadr operand) 'expression)) 0)
+	(t (resolve-expression (cadr operand)))))
+
+(defun bit-vector->int (vector)
+  "Converts a bit-vector to an integer, assuming that array indices
+correspond to bit places in the integer.  (For example, index 0 in
+VECTOR corresponds to the least-significant bit of the return value.)"
+  (do ((value 0 (+ (ash value 1) (aref vector i)))
+       (i (1- (length vector)) (1- i)))
+      ((< i 0) value)))
+
+;;; XXX probably totally fucked in this modern world of Unicode.
+(defun string->int (string)
+  "Converts a string to an integer, assuming that character elements
+correspond to bytes, and that they are limited in range from 0 to
+255."
+  (do ((value 0 (+ (ash value 8) (char-code (char string i))))
+       (i 0 (1+ i)))
+      ((>= i (length string)) value)))
+
+(defun carat (x) (if (consp x) (car x) x))
+
 
 (defun register-mask-list (operand &key flipped-p)
-  (values 0 16))
+  (let ((bitmask (make-array '(16) :element-type 'bit :initial-element 0)))
+    ;; iterate over operands
+    (dolist (r (if (eql (car operand) 'register)
+		   (list operand)
+		   (cdr operand)))
+      (if (eql (car r) 'register)
+	(setf (aref bitmask (register-idx r :both-sets t)) 1)
+	(warn "register-mask-list: ignoring ~A" r)))
+    (values (bit-vector->int (if flipped-p (nreverse bitmask) bitmask))
+	    16)))
 
 (defun effective-address-mode (operand &key (flipped-p nil))
   "Calculates the classic six-bit effective address mode and register
 values.  If FLIPPED-P, returns the mode and register values swapped."
-  ;; return value and number of bits.
-  (values 0 6))
+  (flet ((combine (m r)
+	   (logior (if flipped-p (ash r 3) r) (if flipped-p m (ash m 3)))))
+    (values
+     (ecase (car operand)
+       (register
+	(cond ((data-register-p operand) (combine 0 (register-idx operand)))
+	      ((address-register-p operand) 
+	       (combine #b001 (register-idx operand)))
+	      ;; XXX I'm a bit iffy on this one, but so the book says...
+	      ((string-equal (caadr operand) "SR") (combine #b111 #b100))))
+       (displacement-indirect
+	(let ((base (indirect-base-register operand)))
+	  (cond ((pc-register-p base) (combine #b111 #b010))
+		((eql (refine-type operand) 'vanilla-indirect)
+		 (combine #b010 (register-idx base)))
+		(t (combine #b101 (register-idx base))))))
+       (indexed-indirect
+	(let ((base (indirect-base-register operand)))
+	  (cond ((pc-register-p base) (combine #b111 #b011))
+		(t (combine #b110 (register-idx base))))))
+       (absolute
+	(ecase (refine-type operand)
+	  (absolute-short (combine #b111 #b000))
+	  (absolute-long (combine #b111 #b001))))
+       (immediate (combine #b111 #b100))
+       (postincrement-indirect
+	(combine #b011 (register-idx (indirect-base-register operand))))
+       (predecrement-indirect
+	(combine #b100 (register-idx (indirect-base-register operand)))))
+     6)))
 
-(defun effective-address-extra (operand)
+(defun effective-address-extra (operand modifier)
   "Returns the extra data required for addressing OPERAND, along with
 the length of that data."
-  (values 0 ?))
+  (ecase (car operand)
+    (register (values 0 0))
+    (displacement-indirect
+     (if (eql (refine-type operand) 'vanilla-indirect)
+	 (values 0 0)
+	 (values (indirect-displacement operand) 16)))
+    (indexed-indirect
+     (let ((index (indirect-index-register operand)))
+       (if (not (pc-register-p (indirect-base-register operand)))
+	   ;; rrrr l000 dddd dddd
+	   (values (logior (ash (register-idx index :both-sets t) 12)
+			   (if (aand (register-modifier index)
+				     (eql it 'long))
+			       (ash #b1 11) 0)
+			   (logand (indirect-displacement operand) #xff))
+		   16)
+	   (error "Not sure how to encode this!")))) ;XXX
+    (absolute
+      (ecase (refine-type operand)
+	(absolute-short (values (absolute-value operand) 16))
+	(absolute-long (values (absolute-value operand) 32))))
+    ;; XXX test extent of value
+    (immediate (values (immediate-value operand)
+		       (if (eql modifier 'long) 32 16)))
+    (postincrement-indirect (values 0 0))
+    (predecrement-indirect (values 0 0))))
+
+;; XXX this name sucks (too much like ABS)
+(defun absolute-value (operand)
+  ;; XXX deal with short and long
+  (values (resolve-expression (second operand)) 16))
+
+;;; XXX defaults to nil.
+(defun absolute-definitely-needs-long-p (operand)
+  (let ((v (resolve-expression (second operand))))
+    (and (integerp v) (or (< v -32768)
+			  (> v 65535)))))
 
 (defun immediate-value (operand &optional modifier)
   "Returns a certain number of bits from the immediate value of
 OPERAND, based on MODIFIER, if specified."
-  (values 0 (case modifier (byte 8) (word 16) (long 32) (nil '?))))
+  (values (resolve-expression (second operand))
+	  (case modifier (byte 8) (word 16) (long 32) (t '?))))
 
 (defun modifier-bits (modifier)
   (values (ecase modifier (byte #b00) (word #b01) (long #b10)) 2))
 
 (defun branch-displacement-bits (operand modifier)
   ;; either 8 or 24 (top 8 bits set to zero)
-  (values 8 (absolute-value operand)))
+  (values (absolute-value operand) (if (eql modifier 'word) 24 8)))
 
+
+;;;; TEMPLATE EVALUATOR
+
+(defun generate-code (template operands modifier)
+  (let ((result 0) (result-len 0))
+    (dolist (item template)
+      (let ((length (first item)))
+	(cond ((atom (second item))
+	       (incf result-len length)
+	       (setf result (logior (ash result length) (second item))))
+	      (t
+	       ;; if the first is an integer, add it to the
+	       ;; result-length.
+	       ;; if the second is an atom, or it into the result.
+	       ;; if the second is a list, evaluate it with first-operand,
+	       ;; second-operand, and modifier bound.
+
+	       ;; XXX alt-implementation -- use sublis to replace
+	       ;; operand names and then do funcall.
+	       (let ((op-names (list 'first-operand 'second-operand)))
+		 (multiple-value-bind (val val-len)
+		     (eval `(let (,@(mapcar (lambda (x)
+					      (list (pop op-names) `',x))
+					    operands)
+				  (modifier ',modifier))
+			     ,(second item)))
+		   (unless (integerp length) (setf length val-len))
+		   (when (integerp val)
+		     (incf result-len length)
+		     (setf result (logior (ash result length)
+					  (logand val (1- (ash 1 length))))))))))))
+    (values result result-len)))
+
+;;;; EOF codegen.lisp

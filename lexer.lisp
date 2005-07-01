@@ -3,6 +3,10 @@
 
 ;;;; TOKEN PARAMETERS
 
+(defparameter *lexer-terminals*
+  '(open close colon comma hash + - / * or & ^ ~ << >>
+    constant symbol register opcode pseudo-op $))
+
 (defparameter *lexer-single-char-tokens*
   '((#\( open)
     (#\) close)
@@ -44,6 +48,7 @@
 
 (defun lexer-next-line ()
   (setf *lexer-seen-only-whitespace-this-line-p* t)
+  (setf (third *lexer-position*) 1)
   (incf (second *lexer-position*)))
 (defun lexer-next-column () (incf (third *lexer-position*)))
 
@@ -153,6 +158,8 @@ character is not a digit."
        (read-line stream)
        (maybe-return-$ stream)))))
 
+;;;; LEXER HELPERS
+
 (defun maybe-return-$ (stream)
   (cond (*lexer-seen-only-whitespace-this-line-p*
 	 (lexer-next-line) (next-token stream))
@@ -160,3 +167,11 @@ character is not a digit."
 
 (defun make-token (symbol value)
   (list symbol value (copy-list *lexer-position*)))
+
+(defun terminal-p (symbol) (member symbol *lexer-terminals*))
+
+(defun is-position-info-p (x)
+  (and (= (length x) 3)
+       (stringp (first x))
+       (numberp (second x))
+       (numberp (third x))))
