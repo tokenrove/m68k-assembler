@@ -24,12 +24,13 @@
     (control-addressing-modes ,(set-difference *all-ea-modes*
      '(address-register data-register immediate predecrement-indirect
        postincrement-indirect)))
-    (movem-pre-modes '(vanilla-indirect predecrement-indirect
+    (movem-pre-modes (vanilla-indirect predecrement-indirect
+		      displacement-indirect indexed-indirect absolute-short
+		      absolute-long))
+    (movem-post-modes (vanilla-indirect postincrement-indirect
 		       displacement-indirect indexed-indirect absolute-short
-		       absolute-long))
-    (movem-post-modes '(vanilla-indirect postincrement-indirect
-		       displacement-indirect indexed-indirect absolute-short
-		       absolute-long pc-displacement pc-index))))
+		       absolute-long pc-displacement pc-index))
+    (absolute (absolute-short absolute-long))))
 
 ; memory-alterable-modes -> indirect-modes + absolute
 ; data-alterable-modes -> memory-alterable-modes + data-register
@@ -86,8 +87,8 @@
 	(format t "~&v-constraint: ~A" v-constraint)))))
 
 (defun satisfies-modifier-constraints-p (modifier mod-list)
-  (cond ;((null modifier) (guess-modifier))
-	((null mod-list) (null modifier))
+  (cond ((null mod-list) (null modifier))
+	((null modifier) t) ;; for the moment
 	(t (member modifier mod-list))))
 
 
@@ -265,41 +266,72 @@ OPERAND, based on MODIFIER, if specified."
 (defun modifier-bits (modifier)
   (values (ecase modifier (byte #b00) (word #b01) (long #b10)) 2))
 
-(defun branch-displacement-bits (operand modifier)
-  ;; either 8 or 24 (top 8 bits set to zero)
-  (values (absolute-value operand) (if (eql modifier 'word) 24 8)))
+(defun modifier-bits-for-move (modifier)
+  (values (ecase modifier (byte #b01) (word #b11) (long #b10)) 2))
+
+
+(defun branch-displacement-bits (operand modifier &key db-p)
+  "Returns displacement of OPERAND relative to *PROGRAM-COUNTER*.  If
+:DB-P is T, calculate displacement as per the DBcc opcodes (always
+16-bit).  Otherwise, calculate displacement as per Bcc opcodes, where
+displacement is either 8 bits or 16 padded to 24."
+  (let ((value (absolute-value operand)))
+    ;; Note PC+2 -- this is due to the way the m68k fetches
+    ;; instructions.
+    (values (or (and (integerp value)
+		     (- value (+ *program-counter* 2)))
+		value)
+	    (cond (db-p 16)
+		  ((eql modifier 'word) 24) ;XXX should zero top 8 bits.
+		  (t 8)))))
 
 
 ;;;; TEMPLATE EVALUATOR
 
-(defun generate-code (template operands modifier)
-  (let ((result 0) (result-len 0))
-    (dolist (item template)
-      (let ((length (first item)))
-	(cond ((atom (second item))
-	       (incf result-len length)
-	       (setf result (logior (ash result length) (second item))))
-	      (t
-	       ;; if the first is an integer, add it to the
-	       ;; result-length.
-	       ;; if the second is an atom, or it into the result.
-	       ;; if the second is a list, evaluate it with first-operand,
-	       ;; second-operand, and modifier bound.
 
-	       ;; XXX alt-implementation -- use sublis to replace
-	       ;; operand names and then do funcall.
-	       (let ((op-names (list 'first-operand 'second-operand)))
-		 (multiple-value-bind (val val-len)
-		     (eval `(let (,@(mapcar (lambda (x)
-					      (list (pop op-names) `',x))
-					    operands)
-				  (modifier ',modifier))
-			     ,(second item)))
-		   (unless (integerp length) (setf length val-len))
-		   (when (integerp val)
-		     (incf result-len length)
-		     (setf result (logior (ash result length)
-					  (logand val (1- (ash 1 length))))))))))))
-    (values result result-len)))
+(defun make-codegen-sublis (operands modifier)
+  (let ((sub (list (cons 'modifier modifier))))
+    ;; Adjust as necessary for the number of operands possible.
+    (do ((a-> operands (cdr a->))
+	 (b-> '(first-operand second-operand third-operand) (cdr b->)))
+	((or (null a->) (null b->)) sub)
+      (push (cons (car b->) (car a->)) sub))))
+
+(defun fill-codegen-template (list)
+  (do* ((item-> list (cdr item->))
+	(length (caar item->) (caar item->))
+	(formula (cadar item->) (cadar item->))
+	(done-p t))
+       ((null item->) done-p)
+    (when (consp formula)
+      (multiple-value-bind (val val-len) (apply (car formula) (cdr formula))
+	(unless (integerp length) (setf (caar item->) val-len))
+	(when (integerp val-len) (assert (= (caar item->) val-len)))
+	(if (integerp val)
+	    (setf (cadar item->) val)
+	    (setf done-p nil))))))
+
+;;; first do the sublis, then walk through each item doing the
+;;; evaluation when we can.  if everything's reduced to an atom,
+;;; compile it and return it.  otherwise, return the half-completed
+;;; list.
+
+;; if the first is an integer, add it to the result-length.  if the
+;; second is an atom, or it into the result.  if the second is a list,
+;; evaluate it with first-operand, second-operand, and modifier bound.
+(defun generate-code (template operands modifier)
+  (let ((result 0)
+	(result-len 0)
+	(list (sublis (make-codegen-sublis operands modifier) template)))
+
+    (cond ((fill-codegen-template list)
+	   (dolist (item list)
+	     (destructuring-bind (len val) item
+	       (setf result (logior (ldb (byte len 0) val)
+				    (ash result len)))
+	       (incf result-len len)))
+	   (values result result-len))
+	  (t (dolist (item list) (incf result-len (first item)))
+	     (values list result-len)))))
 
 ;;;; EOF codegen.lisp

@@ -25,7 +25,13 @@
 	(t (error "Not sure how to handle this symbol: ~A." sym))))
 
 (defun get-symbol-value (sym)
+  (when (consp sym)
+    (setf sym (second sym)))
   (awhen (gethash sym *symbol-table*) (first it)))
+
+;;;; BACKPATCHING
+
+(defvar *backpatch-list* nil)
 
 ;;;; HELPER FUNCTIONS
 
@@ -57,7 +63,7 @@ resolved."
 	  (~ (aif (resolve-expression (second expression))
 		  (lognot it)
 		  expression))
-	  (symbol (aif (get-symbol-value (second expression))
+	  (symbol (aif (get-symbol-value expression)
 		       it
 		       expression))
 	  (t expression)))))
@@ -74,18 +80,39 @@ determine whether recursive nesting is occuring.")
 
 (defun assemble (file)
   ;; create symbol table
-  (setf *symbol-table* (make-hash-table))
-  ;; create object file tmp (write header, start output section)
+  (setf *symbol-table* (make-hash-table :test 'equal))
   ;; init program counter
   (setf *program-counter* 0)
   ;; create backpatch list
+  (setf *backpatch-list* nil)
   ;; open file and start processing
   (init-lexer file)
-  ;; go through backpatch list, try to make all patches
-  ;; finalize object file (write symbol table, patch header)
-  )
+  (with-open-file (in-stream file)
+    ;; create object file tmp (write header, start output section)
+    (with-open-file (obj-stream "foo.bin" :direction :output
+				:element-type 'unsigned-byte
+				:if-exists :overwrite
+				:if-does-not-exist :create)
+      (process-file in-stream obj-stream)
 
-(defun process-stream (stream)
+      (maphash (lambda (k v) (format t "~&~A => ~A" k v))
+	       *symbol-table*)
+      ;; go through backpatch list, try to make all patches
+      (dolist (x *backpatch-list*)
+	(destructuring-bind (template length *program-counter*
+			     file-position src-position) x
+	  (multiple-value-bind (data len) (generate-code template nil nil)
+	    (when (consp data)
+	      (error "Failed to backpatch @ ~A/~A: ~S."
+		     *program-counter* src-position data))
+	    (assert (= len length))
+	    (assert (file-position obj-stream file-position))
+	    (output-data obj-stream data len))))
+      ;; finalize object file (write symbol table, patch header)
+
+      )))
+
+(defun process-file (in-stream obj-stream)
   (handler-case
       (loop
        ;; line-counter
@@ -93,32 +120,49 @@ determine whether recursive nesting is occuring.")
 	 ;; might suck for superfine debugging/warning precision, but
 	 ;; we really don't need all that clutter.
        (multiple-value-bind (line position)
-	   (unclutter-line (parse (lambda () (next-token stream))))
+	   (unclutter-line (parse (lambda () (next-token in-stream))))
 	 (assert (eql (pop line) 'line))
-
-	 (awhen (find 'label line :key #'car)
-	   (add-to-symbol-table (second it) *program-counter* position))
-	 ;; if there's a label here, add it to the symbol table
-	 ;;   (get-label)
-	 ;; pseudo-ops care about labels, opcodes don't, so
-	 ;; strip the label if it's a pseudo-op.
-
-	 ;; separate opcode and operands
-	 (let ((operation (cadr (find 'operation line :key #'car)))
+       	 (let ((label (find 'label line :key #'car))
+	       (operation (cadr (find 'operation line :key #'car)))
 	       (operands (mapcar #'simplify-operand 
 				 (extract-operands line))))
-	   (format t "~&~A ~A => " operation operands)
-	   (when (consp operation)
-	     (let ((opcode (caadr operation))
-		   (modifier (string-to-modifier (cadadr operation))))
-	       (if (eql (car operation) 'opcode)
-		   (format t "~A"
-			   (awhen (find-matching-entry opcode operands modifier)
-			     (generate-code (second it) operands modifier)))
-		   (format t "~A"
-			   (find opcode *asm-pseudo-op-table*
-				 :key #'car :test #'string-equal))))))))
+	   (cond ((and (consp operation) (eql (car operation) 'opcode))
+		  (assemble-opcode label operation operands obj-stream position))
+		 ((and (consp operation) (eql (car operation) 'pseudo-op))
+		  (assemble-pseudo-op label operation operands obj-stream position))
+		 (t (when label
+		      ;; might be a macro or an equate... see if it
+		      ;; exists, first.  and complain about
+		      ;; redefinition, except in the case of locals.
+		      (add-to-symbol-table (second label) *program-counter*
+					   position)))))))
     (end-of-file)))
+
+(defun assemble-opcode (label operation operands obj-stream position)
+  (let ((opcode (caadr operation))
+	(modifier (string-to-modifier (cadadr operation))))
+    (when label
+      (add-to-symbol-table (second label)
+			   *program-counter* position))
+    (awhen (find-matching-entry opcode operands modifier)
+      (multiple-value-bind (data len)
+	  (generate-code (second it) operands modifier)
+	(when (consp data)
+	  (push (list data len *program-counter*
+		      (file-position obj-stream) position)
+		*backpatch-list*)
+	  (setf data #x4E714E71))	; Output NOP if all else fails.
+	(output-data obj-stream data len)))))
+
+
+(defun assemble-pseudo-op (label operation operands obj-stream position)
+  (let ((opcode (caadr operation))
+	(modifier (string-to-modifier (cadadr operation))))
+    (find opcode *asm-pseudo-op-table*
+	  :key #'car :test #'string-equal)
+    ;; (do-pseudo-op whatever label operands)
+    ))
+
 
 (defun output-data (stream data length)
   "Outputs DATA in big-endian order to the currently active temporary
@@ -126,6 +170,7 @@ object file and updates the program counter.  Returns the address to
 which the data assembled."
   (unless (zerop (mod length 8))
     (setf length (ash (ceiling (/ length 8)) 3)))
+  (incf *program-counter* (ash length -3))
   (do ((pos (- length 8) (- pos 8)))
       ((< pos 0))
     (write-byte (ldb (byte 8 pos) data) stream)))
