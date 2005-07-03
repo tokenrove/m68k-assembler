@@ -10,7 +10,6 @@ Things to add in the grammar/parser/lexer:
 Support for ' (single ASCII character?) -- only because the
 	book I have says it's part of Motorola's standard.  Should it
 	behave like double-quotes or what?
-Macro characters -- < > \ @.
 Support for floats (once FPU instructions are supported).
 Line continuations with "\".
 
@@ -21,6 +20,7 @@ CL-style macros?  (that would be cool!)
 Checking ranges of types, signed indices, etc.
 Support for later chips in the m68k line, and enabling/disabling
 	allowance of their added instructions.
+Nifty local labels a-la GNU as or similar.
 
 
 Things to add in the linker:

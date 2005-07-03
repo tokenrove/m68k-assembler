@@ -133,10 +133,15 @@ character is not a digit."
       ((eql lookahead #\%) (make-token 'constant (eat-binary stream)))
       ((member lookahead *lexer-word-characters*)
        (let ((token (eat-symbol stream)))
-	 (acond ((register-p token) (make-token 'register it))
-		((opcode-p token) (make-token 'opcode it))
-		((pseudo-op-p token) (make-token 'pseudo-op it))
-		(t (make-token 'symbol token)))))
+	 (multiple-value-bind (string modifier) (munge-modifier token)
+	   (setf modifier (string-to-modifier modifier))
+	   (acond ((register-p string) (make-token 'register 
+						   (list string modifier)))
+		  ((opcode-p string) (make-token 'opcode
+						 (list string modifier)))
+		  ((pseudo-op-p string) (make-token 'pseudo-op
+						    (list string modifier)))
+		  (t (make-token 'symbol token))))))
       ((eql lookahead #\")		; string
        (make-token 'constant (eat-string stream)))
 
@@ -192,3 +197,9 @@ character is not a digit."
        (stringp (first x))
        (numberp (second x))
        (numberp (third x))))
+
+(defun string-to-modifier (string)
+  (cond ((string-equal string "b") 'byte)
+	((string-equal string "w") 'word)
+	((string-equal string "l") 'long)))
+

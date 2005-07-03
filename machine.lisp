@@ -433,28 +433,24 @@
 
 ;;;; HELPER FUNCTIONS
 
-(defun munge-modifier-and-find-in-table (string table)
+(defun munge-modifier (string)
   (let ((modifier nil))
     (awhen (position #\. string)
       (setf modifier (subseq string (1+ it)))
       (setf string (subseq string 0 it)))
-    (awhen (find string table :key #'car :test #'string-equal)
-      (list string modifier))))
+    (values string modifier)))
 
 (defun register-p (string)
+  ;; XXX: allow dynamic register substitutions for EQUR directive
   (when (string-equal string "sp") (setf string "a7"))
-  (munge-modifier-and-find-in-table string *asm-register-table*))
+  (find string *asm-register-table* :key #'car :test #'string-equal))
 
 (defun opcode-p (string)
-  (munge-modifier-and-find-in-table string *asm-opcode-table*))
+  (find string *asm-opcode-table* :key #'car :test #'string-equal))
 
 (defun pseudo-op-p (string)
-  (munge-modifier-and-find-in-table string *asm-pseudo-op-table*))
-
-(defun string-to-modifier (string)
-  (cond ((string-equal string "b") 'byte)
-	((string-equal string "w") 'word)
-	((string-equal string "l") 'long)))
+  (or (find string *asm-pseudo-op-table* :key #'car :test #'string-equal)
+      (eql (get-symbol-type string) 'macro)))
 
 
 ;;; Really dumb, but this was the only thing in the code generation

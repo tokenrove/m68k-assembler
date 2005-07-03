@@ -249,7 +249,10 @@ the length of that data."
 ;; XXX this name sucks (too much like ABS)
 (defun absolute-value (operand)
   ;; XXX deal with short and long
-  (values (resolve-expression (second operand)) 16))
+  (when (and (consp operand)
+	     (eql (first operand) 'absolute))
+    (setf operand (second operand)))
+  (values (resolve-expression operand) 16))
 
 ;;; XXX defaults to nil.
 (defun absolute-definitely-needs-long-p (operand)

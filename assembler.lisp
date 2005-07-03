@@ -10,6 +10,14 @@
 		  (format t "~&changing to section ~A" (first operands))))
     ("INCLUDE")
     ("INCBIN")
+    ;; Note: not DevPAC.
+    ("ALIGN" ,(lambda (label op operands modifier)
+		 (declare (ignore op modifier))
+		 (handle-label-normally label)
+		 (let ((align (absolute-value (first operands))))
+		   (do ()
+		       ((zerop (mod *program-counter* align)))
+		     (output-data 0 8)))))
     ("EVEN" ,(lambda (label op operands modifier)
 		(declare (ignore op modifier operands))
 		(handle-label-normally label)
@@ -56,12 +64,13 @@
 	      (dolist (x operands)
 		(let ((data (absolute-value x))
 		      (length (ecase modifier (byte 8) (word 16) (long 32))))
-		  (if (consp data)
-		      (push (make-backpatch-item
-			     `((,length (absolute-value ,data)))
-			     length)
-			    *backpatch-list*)
-		      (output-data data length))))))
+		  (when (consp data)
+		    (push (make-backpatch-item
+			   `((,length (absolute-value ,data)))
+			   length)
+			  *backpatch-list*)
+		    (setf data #x4E714E71))
+		  (output-data data length)))))
     ("DS" ,(lambda (label op operands modifier)
 	      (declare (ignore op))
 	      (handle-label-normally label)
@@ -79,7 +88,10 @@
     ;; IFEQ etc etc
     ("XDEF")
     ("XREF")
-    ("ORG")
+    ("ORG" ,(lambda (label op operands modifier)
+	       (declare (ignore label op modifier))
+	       (assert (eql (car (first operands)) 'absolute))
+	       (setf *program-counter* (absolute-value (first operands)))))
     ("END")))
 
 ;;;; MACROS
@@ -130,10 +142,18 @@
 
 (defvar *symbol-table* nil)
 
+(defun maybe-local-label (sym)
+  (when (and (plusp (length sym)) (eql (char sym 0) #\.))
+    (concatenate 'string *last-label* sym)))
+
 (defun add-to-symbol-table (sym value &key (type 'relative))
   (cond ((consp sym)
 	 (when (eql (first sym) 'label) (setf sym (second sym)))
 	 (assert (eql (first sym) 'symbol))
+	 (when (eql type 'relative)
+	   (aif (maybe-local-label (second sym))
+		(setf (second sym) it)
+		(setf *last-label* (second sym))))
 	 (setf (gethash (second sym) *symbol-table*)
 	       (list type value *source-position*)))
 	(t (error "Not sure how to handle this symbol: ~A." sym))))
@@ -142,13 +162,17 @@
   (when (consp sym)
     (when (eql (first sym) 'label) (setf sym (second sym)))
     (setf sym (second sym)))
-  (awhen (gethash sym *symbol-table*) (second it)))
+  (awhen (or (gethash sym *symbol-table*)
+	     (gethash (maybe-local-label sym) *symbol-table*))
+    (second it)))
 
 (defun get-symbol-type (sym)
   (when (consp sym)
     (when (eql (first sym) 'label) (setf sym (second sym)))
     (setf sym (second sym)))
-  (awhen (gethash sym *symbol-table*) (first it)))
+  (awhen (or (gethash sym *symbol-table*)
+	     (gethash (maybe-local-label sym) *symbol-table*))
+    (first it)))
 
 (defun asm-symbol-text (sym)
   (if (eql (car sym) 'absolute)
@@ -161,7 +185,22 @@
 
 (defun make-backpatch-item (data length)
   (list data length *program-counter*
-	(file-position *object-stream*) *source-position*))
+	(file-position *object-stream*) *last-label* *source-position*))
+
+(defun backpatch ()
+  ;; go through backpatch list, try to make all patches
+  (dolist (x *backpatch-list*)
+    (destructuring-bind (template length *program-counter*
+				  file-position *last-label* 
+				  *source-position*) x
+      (multiple-value-bind (data len) (generate-code template nil nil)
+	(when (consp data)
+	  (error "Failed to backpatch @ ~A/~A: ~S."
+		 *program-counter* *source-position* data))
+	(assert (= len length))
+	(assert (file-position *object-stream* file-position))
+	(output-data data len)))))
+
 
 ;;;; HELPER FUNCTIONS
 
@@ -189,7 +228,7 @@ resolved."
 	  (or (bin-op 'or #'logior))
 	  (^ (bin-op '^ #'logxor))
 	  (<< (bin-op '<< #'ash))
-	  (>> (bin-op '<< #'(lambda (n count) (ash n (- count)))))
+	  (>> (bin-op '>> #'(lambda (n count) (ash n (- count)))))
 	  (~ (aif (resolve-expression (second expression))
 		  (lognot it)
 		  expression))
@@ -210,6 +249,11 @@ determine whether recursive nesting is occuring.")
 
 (defvar *object-stream*)
 (defvar *program-counter*)
+(defvar *last-label* nil "Last label seen by the assembler.  This is
+used for generating the prefix for local labels.")
+
+(defun temporary-object-name ()
+  "foo.bin")
 
 (defun assemble (file)
   ;; create symbol table
@@ -219,28 +263,20 @@ determine whether recursive nesting is occuring.")
 	;; create backpatch list
 	*backpatch-list* nil
 	;; init macro variables
-	*defining-macro-p* nil *defining-rept-p* nil)
+	*defining-macro-p* nil *defining-rept-p* nil
+	;; last label seen
+	*last-label* nil)
   ;; open file and start processing
   (init-lexer file)
   (with-open-file (in-stream file)
     ;; create object file tmp (write header, start output section)
-    (with-open-file (*object-stream* "foo.bin" :direction :output
+    (with-open-file (*object-stream* (temporary-object-name)
+				     :direction :output
 				     :element-type 'unsigned-byte
-				     :if-exists :overwrite
+				     :if-exists :new-version
 				     :if-does-not-exist :create)
       (process-file in-stream)
-
-      ;; go through backpatch list, try to make all patches
-      (dolist (x *backpatch-list*)
-	(destructuring-bind (template length *program-counter*
-			     file-position *source-position*) x
-	  (multiple-value-bind (data len) (generate-code template nil nil)
-	    (when (consp data)
-	      (error "Failed to backpatch @ ~A/~A: ~S."
-		     *program-counter* *source-position* data))
-	    (assert (= len length))
-	    (assert (file-position *object-stream* file-position))
-	    (output-data data len))))
+      (backpatch)
       ;; finalize object file (write symbol table, patch header)
       )))
 
@@ -290,18 +326,17 @@ determine whether recursive nesting is occuring.")
 	     ;; might be a macro or something... see if it
 	     ;; exists, first.  and complain about
 	     ;; redefinition, except in the case of locals.
-	     (case (get-symbol-type label)
-	       (macro (execute-macro (second label) operands))
-	       (relative (format t "~&redef ~A at ~S" label *source-position*))
-	       (t (handle-label-normally label))))))))
+	     (if (get-symbol-type label)
+		 (warn "~&~S: tried to redefine ~A (cowardly not allowing this)." *source-position* label)
+		 (handle-label-normally label)))))))
 
 (defun handle-label-normally (label)
-  (when label
+  (when (and label (null (get-symbol-type label)))
     (add-to-symbol-table (second label) *program-counter*)))
 
 (defun assemble-opcode (label operation operands)
   (let ((opcode (caadr operation))
-	(modifier (string-to-modifier (cadadr operation))))
+	(modifier (cadadr operation)))
     (handle-label-normally label)
     (awhen (find-matching-entry opcode operands modifier)
       (multiple-value-bind (data len)
@@ -313,12 +348,15 @@ determine whether recursive nesting is occuring.")
 
 
 (defun assemble-pseudo-op (label operation operands)
-  (let* ((opcode (caadr operation))
-	 (modifier (string-to-modifier (cadadr operation)))
-	 (entry (cadr (find opcode *asm-pseudo-op-table*
-			    :key #'car :test #'string-equal))))
-    (when (functionp entry)
-      (funcall entry label opcode operands modifier))))
+  (let ((opcode (caadr operation))
+	(modifier (cadadr operation)))
+    (acond ((find opcode *asm-pseudo-op-table*
+		  :key #'car :test #'string-equal)
+	    (when (functionp (second it))
+	      (funcall (second it) label opcode operands modifier)))
+	   ((eql (get-symbol-type opcode) 'macro)
+	    (execute-macro opcode operands))
+	   (t (error "~&~S: bad pseudo-op ~A!" *source-position* opcode)))))
 
 
 (defun output-data (data length)
