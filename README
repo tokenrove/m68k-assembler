@@ -12,6 +12,7 @@ Support for ' (single ASCII character?) -- only because the
 	behave like double-quotes or what?
 Macro characters -- < > \ @.
 Support for floats (once FPU instructions are supported).
+Line continuations with "\".
 
 
 Things to add in the assembler:
@@ -28,3 +29,12 @@ uh, the whole linker. ;-)
 Atari ST bootfloppy target.
 Atari ST PRG target.
 linker scripts.
+
+
+
+KNOWN MAJOR INCOMPATIBILITIES WITH DEVPAC
+
+Macros:
+
+- no support for \0. [assembler]
+- can't pass macro parameters with embedded < or > characters. [lexer]

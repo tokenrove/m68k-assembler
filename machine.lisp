@@ -185,7 +185,20 @@
 	     (6 (effective-address-mode second-operand))
 	     (8 #b00000000) (8 (immediate-value immediate 'byte))
 	     (? (effective-address-extra second-operand modifier))))))
-       '(("BCHG" . #b01) ("BCLR" . #b10) ("BSET" . #b11) ("BTST" . #b00)))
+       '(("BCHG" . #b01) ("BCLR" . #b10) ("BSET" . #b11) ))
+    ;; Note that BTST supports PC-relative, while the above three do
+    ;; not.
+    ("BTST"
+     (((byte long) (data-register) (data-addressing-modes))
+	    ((4 #b0000) (3 (register-idx first-operand))
+	     (3 #b100)
+	     (6 (effective-address-mode second-operand))
+	     (? (effective-address-extra second-operand modifier))))
+     (((byte long) (immediate) (data-addressing-modes))
+      ((10 #b0000100000)
+       (6 (effective-address-mode second-operand))
+       (8 #b00000000) (8 (immediate-value immediate 'byte))
+       (? (effective-address-extra second-operand modifier)))))
 
     ("CHK"
      (((word) (data-addressing-modes) (data-register))

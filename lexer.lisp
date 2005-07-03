@@ -26,7 +26,7 @@
   `(,@(list-char-range #\A #\Z)
     ,@(list-char-range #\a #\z)
     ,@(list-char-range #\0 #\9)
-    #\_ #\.)
+    #\_ #\. #\=)
   "Characters permitted in a symbol, register, or opcode.")
 (defparameter *lexer-int-characters* `(,@(list-char-range #\0 #\9))
   "Characters permitted in an integer.")
@@ -62,15 +62,16 @@
     (read-char stream)
     (lexer-next-column)))
 
-(defun eat-string (stream)
-  "Reads a quote-delimited, backslash-escaped string from STREAM."
-  (assert (eql (read-char stream) #\"))
+(defun eat-string (stream &optional (start #\") (end #\"))
+  "Reads a backslash-escaped string from STREAM, delimited by the
+characters START and END (which default to quotes)."
+  (assert (eql (read-char stream) start))
   (lexer-next-column)
   (do ((next-char #1=(progn (lexer-next-column)
 			    (read-char stream)) #1#)
        (string (make-array '(0) :element-type 'character
 			   :adjustable t :fill-pointer 0)))
-      ((eql next-char #\") string)
+      ((eql next-char end) string)
     (acase next-char
       (#\\ (vector-push-extend (read-char stream) string)
 	   (lexer-next-column))
@@ -140,14 +141,30 @@ character is not a digit."
        (make-token 'constant (eat-string stream)))
 
       ;; Little special cases.
-      ((eql lookahead #\<)		; expect <
+      ((eql lookahead #\<)		; expect < or macro parameter
        (read-char stream)
-       (assert (eql (read-char stream) #\<))
-       (make-token '<< nil))
+       (cond ((eql (peek-char nil stream) #\<)
+	      (read-char stream)
+	      (make-token '<< nil))
+	     ;; XXX: one problem here is that we don't deal with
+	     ;; escaped <'s inside the string, and I'm not too anxious
+	     ;; to do so yet, either.
+	     (t (unread-char #\< stream)
+		(make-token 'symbol (eat-string stream #\< #\>)))))
       ((eql lookahead #\>)		; expect >
        (read-char stream)
        (assert (eql (read-char stream) #\>))
        (make-token '>> nil))
+      ((eql lookahead #\\)
+       ;; if it's a macro parameter (\[1-9A-Za-z] or \@) store it as a
+       ;; symbol ... MACRO will know what to do with it.
+       ;; also there's \symbol and \$symbol but I'm not sure if we'll
+       ;; support them yet.
+       ;; otherwise, it might be a line continuation token. XXX
+       (read-char stream)
+       (when (or (char-equal (peek-char nil stream) #\@)
+		 (member (peek-char nil stream) *lexer-word-characters*))
+	 (make-token 'symbol (concatenate 'string "\\" (eat-symbol stream)))))
       ((eql lookahead #\;)		; comment
        (read-line stream)
        (maybe-return-$ stream))

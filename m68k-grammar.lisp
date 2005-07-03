@@ -8,6 +8,7 @@
     line ((label)
 	  (label operation)
 	  (label operation operands)
+	  (label operands)
 	  (operation)
 	  (operation operands))
     label ((symbol) (symbol colon))
