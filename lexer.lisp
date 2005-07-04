@@ -26,7 +26,7 @@
   `(,@(list-char-range #\A #\Z)
     ,@(list-char-range #\a #\z)
     ,@(list-char-range #\0 #\9)
-    #\_ #\. #\=)
+    #\_ #\. #\= #\\ #\@)
   "Characters permitted in a symbol, register, or opcode.")
 (defparameter *lexer-int-characters* `(,@(list-char-range #\0 #\9))
   "Characters permitted in an integer.")
@@ -135,13 +135,14 @@ character is not a digit."
        (let ((token (eat-symbol stream)))
 	 (multiple-value-bind (string modifier) (munge-modifier token)
 	   (setf modifier (string-to-modifier modifier))
-	   (acond ((register-p string) (make-token 'register 
+	   (cond ((register-p (register-substitutions string))
+		  (make-token 'register (list (register-substitutions string)
+					      modifier)))
+		 ((opcode-p string) (make-token 'opcode
+						(list string modifier)))
+		 ((pseudo-op-p string) (make-token 'pseudo-op
 						   (list string modifier)))
-		  ((opcode-p string) (make-token 'opcode
-						 (list string modifier)))
-		  ((pseudo-op-p string) (make-token 'pseudo-op
-						    (list string modifier)))
-		  (t (make-token 'symbol token))))))
+		 (t (make-token 'symbol token))))))
       ((eql lookahead #\")		; string
        (make-token 'constant (eat-string stream)))
 

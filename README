@@ -31,10 +31,28 @@ Atari ST PRG target.
 linker scripts.
 
 
+THINGS TO DO BEFORE RELEASE
+
+- remove debugging output.
+- add a decent warning/error display and logging system.
+- temp-files/osicat.
+- compile list of known issues, try to resolve.
+
+
+KNOWN ISSUES
+
+- macro parameters are broken.  need to keep the strings of the
+  operands around, operate on them, then feed them through the lexer
+  and parser "late".  This includes \0.
+- addq/subq are broken with immediate value #8. [codegen]
+- no checking of vconstraints yet. [codegen]
+
 
 KNOWN MAJOR INCOMPATIBILITIES WITH DEVPAC
 
+These are things which aren't likely to change soon.
+
 Macros:
 
-- no support for \0. [assembler]
-- can't pass macro parameters with embedded < or > characters. [lexer]
+- we don't support < or > embedded in macro parameters which are
+  already wrapped in < and >.  (eg: "<foo>>>>2>" => "foo>>2") [lexer]

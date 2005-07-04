@@ -4,9 +4,10 @@
 (in-package #:assembler-system)
 
 (defsystem m68k-assembler
-  :depends-on (:anaphora)
+  :depends-on (:anaphora :cl-ppcre)
   :components
   ((:file "package")
+   (:file "utils" :depends-on ("package"))
    (:file "machine" :depends-on ("package"))
    (:file "lexer" :depends-on ("package"))
    (:file "parser" :depends-on ("package"))

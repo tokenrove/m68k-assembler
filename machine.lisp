@@ -440,9 +440,12 @@
       (setf string (subseq string 0 it)))
     (values string modifier)))
 
-(defun register-p (string)
+(defun register-substitutions (string)
   ;; XXX: allow dynamic register substitutions for EQUR directive
   (when (string-equal string "sp") (setf string "a7"))
+  string)
+
+(defun register-p (string)
   (find string *asm-register-table* :key #'car :test #'string-equal))
 
 (defun opcode-p (string)

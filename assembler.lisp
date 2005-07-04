@@ -46,16 +46,16 @@
      ,(lambda (label op operands modifier)
          (declare (ignore label op modifier))
 	 (assert (not *defining-rept-p*))
-	 (setf *rept-buffer* (list (absolute-value (first operands)))
+	 (setf *macro-buffer* (list (absolute-value (first operands)))
 	       *defining-rept-p* t)))
     ("ENDR"
      ,(lambda (label op operands modifier)
          (declare (ignore label op operands modifier))
 	 (assert *defining-rept-p*)
-	 (setf *rept-buffer* (nreverse *rept-buffer*)
+	 (setf *macro-buffer* (nreverse *macro-buffer*)
 	       *defining-rept-p* nil)
-	 (dotimes (i (pop *rept-buffer*))
-	   (dolist (x *rept-buffer*)
+	 (dotimes (i (pop *macro-buffer*))
+	   (dolist (x *macro-buffer*)
 	     (process-line x)))))
     ("DC" ,(lambda (label op operands modifier)
 	      (declare (ignore op))
@@ -100,12 +100,9 @@
 ;; so we can expand ourselves.  Note that macros have their names
 ;; stored in a separate symbol table, for devpac compatibility.
 
- ;;; XXX maybe merge macro and repeat buffers?  I don't think macro
- ;;; and repeat can happen at the same time, anyway.
 (defvar *defining-macro-p* nil)
-(defvar *macro-buffer*)
 (defvar *defining-rept-p* nil)
-(defvar *rept-buffer*)
+(defvar *macro-buffer*)
 
 (defun define-equate (label op operands modifier)
   (declare (ignore op modifier))
@@ -115,7 +112,6 @@
   (add-to-symbol-table label (resolve-expression (first operands))
 		       :type 'absolute))
 
-
 (defun macro-count (macro)
   (first macro))
 (defun macro-body (macro)
@@ -124,18 +120,31 @@
   (setf (first macro) value))
 
 
-(defun execute-macro (name operands)
-  (let ((op-subs '("\\1" "\\2" "\\3" "\\4" "\\5" "\\6" "\\7" "\\8" "\\9"))
-	(sub (list (cons '(symbol "\\@")
-			 `(symbol ,(format nil "_~D"
-					   (incf (macro-count (get-symbol-value name)))))))))
-    (do ((x-> operands (cdr x->))
-	 (y-> op-subs (cdr y->)))
-	((or (null x->) (null y->)))
-      (push (cons `(symbol ,y->) (car x->)) sub))
-
-    (dolist (x (macro-body (get-symbol-value name)))
-      (process-line (sublis sub x :test #'equal)))))
+(defun execute-macro (name operands modifier)
+  (labels ((sub (match &rest registers)
+	       (declare (ignore registers))
+	       (acase (char match 1)
+		 (#\@ (format nil "_~D" 
+			      (macro-count (get-symbol-value name))))
+		 (#\0 (case modifier
+			(byte ".B")
+			(long ".L")
+			((word t) ".W")))
+		 (t (nth (digit-to-int it 36) operands))))
+	     (seek+destroy (tree)
+	       (cond ((stringp tree)
+		      (cl-ppcre:regex-replace-all "\\\\[0-9A-Za-z@]"
+						  tree #'sub
+						  :simple-calls t))
+		     ((consp tree)
+		      (let ((new-tree nil))
+			(dolist (branch tree)
+			  (push (seek+destroy branch) new-tree))
+			(nreverse new-tree)))
+		     (t tree))))
+      (dolist (x (macro-body (get-symbol-value name)))
+	(process-line (seek+destroy x)))
+      (incf (macro-count (get-symbol-value name)))))
 
 
 ;;;; SYMBOL TABLE
@@ -270,11 +279,11 @@ used for generating the prefix for local labels.")
   (init-lexer file)
   (with-open-file (in-stream file)
     ;; create object file tmp (write header, start output section)
-    (with-open-file (*object-stream* (temporary-object-name)
-				     :direction :output
-				     :element-type 'unsigned-byte
-				     :if-exists :new-version
-				     :if-does-not-exist :create)
+    (osicat:with-temporary-file (*object-stream*
+				 :direction :output
+				 :element-type 'unsigned-byte
+				 :if-exists :new-version
+				 :if-does-not-exist :create)
       (process-file in-stream)
       (backpatch)
       ;; finalize object file (write symbol table, patch header)
@@ -300,7 +309,7 @@ used for generating the prefix for local labels.")
 		(if (and (eql (operation-type-of-line line) 'pseudo-op)
 			 (string-equal (opcode-of-line line) "ENDR"))
 		    (process-line line)
-		    (push line *rept-buffer*)))
+		    (push line *macro-buffer*)))
 	       (t (process-line line))))) ; otherwise, process it.
     (end-of-file)))
 
@@ -355,7 +364,7 @@ used for generating the prefix for local labels.")
 	    (when (functionp (second it))
 	      (funcall (second it) label opcode operands modifier)))
 	   ((eql (get-symbol-type opcode) 'macro)
-	    (execute-macro opcode operands))
+	    (execute-macro opcode operands modifier))
 	   (t (error "~&~S: bad pseudo-op ~A!" *source-position* opcode)))))
 
 

@@ -1,3 +1,4 @@
 (defpackage #:m68k-assembler
   (:nicknames #:m68k-asm)
-  (:use #:cl #:anaphora))
+  (:use #:cl #:anaphora)
+  (:export #:assemble))
