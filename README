@@ -12,6 +12,7 @@ Support for ' (single ASCII character?) -- only because the
 	behave like double-quotes or what?
 Support for floats (once FPU instructions are supported).
 Line continuations with "\".
+Literate input.
 
 
 Things to add in the assembler:
@@ -21,10 +22,12 @@ Checking ranges of types, signed indices, etc.
 Support for later chips in the m68k line, and enabling/disabling
 	allowance of their added instructions.
 Nifty local labels a-la GNU as or similar.
+Optimizations/data flow analysis.
 
 
 Things to add in the linker:
 
+[see st-linker/]
 uh, the whole linker. ;-)
 Atari ST bootfloppy target.
 Atari ST PRG target.
@@ -37,6 +40,8 @@ THINGS TO DO BEFORE RELEASE
 - add a decent warning/error display and logging system.
 - temp-files/osicat.
 - compile list of known issues, try to resolve.
+- start converting improvised list structure into real structures or
+  objects.
 
 
 KNOWN ISSUES
@@ -46,6 +51,8 @@ KNOWN ISSUES
   and parser "late".  This includes \0.
 - addq/subq are broken with immediate value #8. [codegen]
 - no checking of vconstraints yet. [codegen]
+- DC.B should handle strings properly (right now it will probably only
+  write out the last byte). [assembler]
 
 
 KNOWN MAJOR INCOMPATIBILITIES WITH DEVPAC

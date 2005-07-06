@@ -260,9 +260,8 @@ determine whether recursive nesting is occuring.")
 (defvar *program-counter*)
 (defvar *last-label* nil "Last label seen by the assembler.  This is
 used for generating the prefix for local labels.")
-
-(defun temporary-object-name ()
-  "foo.bin")
+(defvar *current-section* 'text "Current section we're assembling
+in.")
 
 (defun assemble (file)
   ;; create symbol table
@@ -280,10 +279,7 @@ used for generating the prefix for local labels.")
   (with-open-file (in-stream file)
     ;; create object file tmp (write header, start output section)
     (osicat:with-temporary-file (*object-stream*
-				 :direction :output
-				 :element-type 'unsigned-byte
-				 :if-exists :new-version
-				 :if-does-not-exist :create)
+				 :element-type 'unsigned-byte)
       (process-file in-stream)
       (backpatch)
       ;; finalize object file (write symbol table, patch header)
@@ -372,12 +368,10 @@ used for generating the prefix for local labels.")
   "Outputs DATA in big-endian order to the currently active temporary
 object file and updates the program counter.  Returns the address to
 which the data assembled."
-  (unless (zerop (mod length 8))
+  #+nil (unless (zerop (mod length 8))
     (setf length (ash (ceiling (/ length 8)) 3)))
   (incf *program-counter* (ash length -3))
-  (do ((pos (- length 8) (- pos 8)))
-      ((< pos 0))
-    (write-byte (ldb (byte 8 pos) data) *object-stream*)))
+  (write-big-endian-data *object-stream* data length))
 
 
 ;;;; EOF assembler.lisp

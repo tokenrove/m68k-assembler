@@ -19,3 +19,10 @@ correspond to bytes, and that they are limited in range from 0 to
 
 (defun carat (x) (if (consp x) (car x) x))
 
+
+(defun write-big-endian-data (stream data length)
+  (assert (zerop (logand length 7)))
+  (do ((pos (- length 8) (- pos 8)))
+      ((< pos 0))
+    (write-byte (ldb (byte 8 pos) data) stream)))
+

@@ -4,7 +4,7 @@
 (in-package #:assembler-system)
 
 (defsystem m68k-assembler
-  :depends-on (:anaphora :cl-ppcre)
+  :depends-on (:anaphora :cl-ppcre :osicat)
   :components
   ((:file "package")
    (:file "utils" :depends-on ("package"))
