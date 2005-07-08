@@ -26,3 +26,9 @@ correspond to bytes, and that they are limited in range from 0 to
       ((< pos 0))
     (write-byte (ldb (byte 8 pos) data) stream)))
 
+(defun copy-stream-contents (source destination)
+  (file-position source 0)
+  (let ((buffer (make-array '(4096) :element-type 'unsigned-byte)))
+    (do ((bytes #1=(read-sequence buffer source) #1#))
+	((= bytes 0))
+      (write-sequence buffer destination :end bytes))))

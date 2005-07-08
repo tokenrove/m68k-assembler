@@ -7,9 +7,27 @@
   `(("SECTION" ,(lambda (label op operands modifier)
 		  (declare (ignore op modifier))
 		  (handle-label-normally label)
-		  (format t "~&changing to section ~A" (first operands))))
-    ("INCLUDE")
-    ("INCBIN")
+		  (assert (and (eql (caar operands) 'absolute)
+			       (eql (caadar operands) 'symbol)))
+		  (let ((section (intern (cadar (cdar operands))
+					 (find-package "M68K-ASSEMBLER"))))
+		    (assert (assoc section *object-streams*))
+		    (setf *current-section* section))))
+    ("INCLUDE"
+     ,(lambda (label op operands modifier)
+	 (declare (ignore op modifier))
+	 (handle-label-normally label)
+	 (nested-lexing (extract-string-from-operand (first operands)))))
+    ("INCBIN"
+     ,(lambda (label op operands modifier)
+	 (declare (ignore op modifier))
+	 (handle-label-normally label)
+	 (with-open-file (stream (extract-string-from-operand
+				  (first operands))
+				 :direction :input
+				 :element-type 'unsigned-byte)
+	   (copy-stream-contents stream (current-obj-stream))
+	   (incf *program-counter* (file-position stream)))))
     ;; Note: not DevPAC.
     ("ALIGN" ,(lambda (label op operands modifier)
 		 (declare (ignore op modifier))
@@ -194,12 +212,14 @@
 
 (defun make-backpatch-item (data length)
   (list data length *program-counter*
-	(file-position *object-stream*) *last-label* *source-position*))
+	*current-section* (file-position (current-obj-stream))
+	*last-label* *source-position*))
 
 (defun backpatch ()
   ;; go through backpatch list, try to make all patches
   (dolist (x *backpatch-list*)
     (destructuring-bind (template length *program-counter*
+				  *current-section*
 				  file-position *last-label* 
 				  *source-position*) x
       (multiple-value-bind (data len) (generate-code template nil nil)
@@ -207,11 +227,18 @@
 	  (error "Failed to backpatch @ ~A/~A: ~S."
 		 *program-counter* *source-position* data))
 	(assert (= len length))
-	(assert (file-position *object-stream* file-position))
+	(assert (file-position (current-obj-stream) file-position))
 	(output-data data len)))))
 
 
 ;;;; HELPER FUNCTIONS
+
+(defun extract-string-from-operand (operand)
+  (dolist (x operand)
+    (cond ((stringp x) (return x))
+	  ((consp x)
+	   (awhen (extract-string-from-operand operand)
+	     (return it))))))
 
 (defun resolve-expression (expression)
   "Try and get a numerical value from this expression.  Returns the
@@ -256,14 +283,27 @@ determine whether recursive nesting is occuring.")
 
 (defvar *source-position*)
 
-(defvar *object-stream*)
+(defvar *object-streams*)
 (defvar *program-counter*)
 (defvar *last-label* nil "Last label seen by the assembler.  This is
 used for generating the prefix for local labels.")
 (defvar *current-section* 'text "Current section we're assembling
 in.")
 
-(defun assemble (file)
+(defmacro with-object-streams (sections &body body)
+  (if sections
+      (let ((symbol-of-the-day (gensym)))
+	`(osicat:with-temporary-file (,symbol-of-the-day
+				      :element-type 'unsigned-byte)
+	  (push (cons ,(car sections) ,symbol-of-the-day) *object-streams*)
+	  (with-object-streams ,(cdr sections) ,@body)))
+      `(progn ,@body)))
+
+
+(defun current-obj-stream ()
+  (cdr (assoc *current-section* *object-streams*)))
+
+(defun assemble (input-name &key (object-name "mr-ed.o"))
   ;; create symbol table
   (setf *symbol-table* (make-hash-table :test 'equal)
 	;; init program counter
@@ -273,26 +313,65 @@ in.")
 	;; init macro variables
 	*defining-macro-p* nil *defining-rept-p* nil
 	;; last label seen
-	*last-label* nil)
+	*last-label* nil
+	*current-section* 'text
+	*object-streams* nil)
   ;; open file and start processing
-  (init-lexer file)
-  (with-open-file (in-stream file)
-    ;; create object file tmp (write header, start output section)
-    (osicat:with-temporary-file (*object-stream*
-				 :element-type 'unsigned-byte)
-      (process-file in-stream)
-      (backpatch)
-      ;; finalize object file (write symbol table, patch header)
-      )))
+  (with-lexer (input-name)
+    ;; Note that we create a file for BSS even though it should all be
+    ;; zeros just for my utterly lazy convenience.  It's wasteful, but
+    ;; I don't feel like putting in all kinds of hideous special cases
+    ;; just right now.
+    (with-object-streams ('text 'data 'bss)
+      (process-current-file)
+      ;; Prior to backpatching, record section lengths, because
+      ;; temporary-files aren't really file streams the way CL would
+      ;; like them to be, so we can't just FILE-LENGTH them.
+      (let ((lengths (mapcar (lambda (x)
+			       (cons (car x) (file-position (cdr x))))
+			     *object-streams*)))
+	(backpatch)
+	(finalize-object-file object-name lengths)))))
 
-(defun process-file (in-stream)
+
+(defun finalize-object-file (name section-lengths)
+  "Finalize object file (collect sections, write symbol table,
+patch header)."
+  (with-open-file (output-stream name :direction :output
+				 :element-type 'unsigned-byte
+				 :if-exists :new-version
+				 :if-does-not-exist :create)
+    (write-big-endian-data output-stream #x53544F26 32) ; Magic
+    ;; Text, Data, BSS
+    (mapcar (lambda (x)
+	      (write-big-endian-data output-stream (cdr x) 32))
+	    section-lengths)
+    ;; symbol table
+    (write-big-endian-data output-stream 0 32)
+    ;; entry point
+    (write-big-endian-data output-stream 0 32)
+    ;; text reloc size
+    (write-big-endian-data output-stream 0 32)
+    ;; data reloc size
+    (write-big-endian-data output-stream 0 32)
+
+    (copy-stream-contents (cdr (assoc 'text *object-streams*))
+			  output-stream)
+    (copy-stream-contents (cdr (assoc 'data *object-streams*))
+			  output-stream)
+    ;; symbol table
+    ;; relocations
+    ))
+
+
+(defun process-current-file ()
   (handler-case
       (loop
        ;; we strip individual token position information here, which
        ;; might suck for superfine debugging/warning precision, but
        ;; we really don't need all that clutter.
        (multiple-value-bind (line *source-position*)
-	   (unclutter-line (parse (lambda () (next-token in-stream))))
+	   (unclutter-line (parse #'next-token))
 	 (assert (eql (pop line) 'line))
 
 	 ;; if we're in a macro or repeat, accumulate this line.
@@ -307,7 +386,7 @@ in.")
 		    (process-line line)
 		    (push line *macro-buffer*)))
 	       (t (process-line line))))) ; otherwise, process it.
-    (end-of-file)))
+    (end-of-file nil (format t "~&all done now."))))
 
 (defun operation-type-of-line (line)
   (awhen (cadr (find 'operation line :key #'car))
@@ -371,7 +450,7 @@ which the data assembled."
   #+nil (unless (zerop (mod length 8))
     (setf length (ash (ceiling (/ length 8)) 3)))
   (incf *program-counter* (ash length -3))
-  (write-big-endian-data *object-stream* data length))
+  (write-big-endian-data (current-obj-stream) data length))
 
 
 ;;;; EOF assembler.lisp

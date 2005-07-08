@@ -19,9 +19,10 @@ Things to add in the assembler:
 
 CL-style macros?  (that would be cool!)
 Checking ranges of types, signed indices, etc.
+Verify that BSS contains only zeros.
 Support for later chips in the m68k line, and enabling/disabling
 	allowance of their added instructions.
-Nifty local labels a-la GNU as or similar.
+Nifty local labels a-la GNU as or similar.  (0f, 1b, etc)
 Optimizations/data flow analysis.
 
 

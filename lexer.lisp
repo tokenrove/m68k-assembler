@@ -35,24 +35,49 @@
 
 ;;;; LEXER BOOKKEEPING
 
-;;; XXX: keep track of line/column numbers.  I think position will
-;;; become a stack rather than a single list as soon as we handle
-;;; INCLUDE directives and so on.  Except *l-s-o-w-t-l-p* doesn't need
-;;; to keep multi-file state.
-(defvar *lexer-position*)
+(defstruct lexer-state
+  (stream)
+  (filename)
+  (line 1)
+  (column 1))
+
+(defvar *lexer-states* nil)
+;;; *l-s-o-w-t-l-p* doesn't need to keep multi-file state.
 (defvar *lexer-seen-only-whitespace-this-line-p*)
 
-(defun init-lexer (file)
-  (setf *lexer-position* (list file 1 1)
-	*lexer-seen-only-whitespace-this-line-p* t))
+(defmacro with-lexer ((filename) &body body)
+  `(unwind-protect (progn
+		     (init-lexer ,filename)
+		     ,@body)
+    (close-lexer)))
+
+(defun init-lexer (filename)
+  (setf *lexer-states* nil)
+  (nested-lexing filename))
+
+(defun close-lexer ()
+  (do ((s #1=(pop *lexer-states*) #1#))
+      ((null s))
+    (close (lexer-state-stream s))))
 
 (defun lexer-next-line ()
-  (setf *lexer-seen-only-whitespace-this-line-p* t)
-  (setf (third *lexer-position*) 1)
-  (incf (second *lexer-position*)))
-(defun lexer-next-column () (incf (third *lexer-position*)))
+  (setf *lexer-seen-only-whitespace-this-line-p* t
+	(lexer-state-column (first *lexer-states*)) 1)
+  (incf (lexer-state-line (first *lexer-states*))))
 
+(defun lexer-next-column ()
+  (incf (lexer-state-column (first *lexer-states*))))
 
+(defun nested-lexing (filename)
+  (cond ((find filename *lexer-states* :test #'string-equal
+	       :key #'lexer-state-filename)
+	 (warn "~A is already in the chain of INCLUDES!  Ignoring it..."
+	       filename))
+	(t
+	 (setf *lexer-seen-only-whitespace-this-line-p* t)
+	 (push (make-lexer-state :stream (open filename)
+				 :filename filename)
+	       *lexer-states*))))
 
 ;;;; INTERMEDIARY LEXING FUNCTIONS (EATERS)
 
@@ -111,7 +136,16 @@ character is not a digit."
 
 ;;;; MAIN LEXER FUNCTION
 
-(defun next-token (stream)
+(defun next-token ()
+  (handler-case
+      (if *lexer-states*
+	  (next-token-1 (lexer-state-stream (first *lexer-states*)))
+	  (signal 'end-of-file))
+    (end-of-file nil
+      (pop *lexer-states*)
+      (if *lexer-states* (next-token) (signal 'end-of-file)))))
+
+(defun next-token-1 (stream)
   (eat-whitespace stream)
   (let ((lookahead (peek-char nil stream)))
     ;; XXX ugly first-column asterix hack
@@ -123,7 +157,7 @@ character is not a digit."
        (cond (*lexer-seen-only-whitespace-this-line-p*
 	      (read-line stream)
 	      (lexer-next-line)
-	      (next-token stream))
+	      (next-token-1 stream))
 	     (t (read-char stream)
 		(make-token (cadr it) lookahead))))
       ;; The order of the following few cases is significant.
@@ -185,19 +219,15 @@ character is not a digit."
 
 (defun maybe-return-$ (stream)
   (cond (*lexer-seen-only-whitespace-this-line-p*
-	 (lexer-next-line) (next-token stream))
+	 (lexer-next-line) (next-token-1 stream))
 	(t (lexer-next-line) (make-token '$ nil))))
 
 (defun make-token (symbol value)
-  (list symbol value (copy-list *lexer-position*)))
+  (list symbol value (copy-lexer-state (first *lexer-states*))))
 
 (defun terminal-p (symbol) (member symbol *lexer-terminals*))
 
-(defun is-position-info-p (x)
-  (and (= (length x) 3)
-       (stringp (first x))
-       (numberp (second x))
-       (numberp (third x))))
+(defun is-position-info-p (x) (lexer-state-p x))
 
 (defun string-to-modifier (string)
   (cond ((string-equal string "b") 'byte)
