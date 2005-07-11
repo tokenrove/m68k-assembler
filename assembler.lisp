@@ -13,6 +13,15 @@
 					 (find-package "M68K-ASSEMBLER"))))
 		    (assert (assoc section *object-streams*))
 		    (setf *current-section* section))))
+    ("XDEF" #'define-global)
+    ("GLOBAL" #'define-global)
+    ("XREF" #'define-extern)
+    ("EXTERN" #'define-extern)
+    ("ORG" ,(lambda (label op operands modifier)
+	       (declare (ignore label op modifier))
+	       (assert (eql (car (first operands)) 'absolute))
+	       (setf *program-counter* (absolute-value (first operands)))))
+
     ("INCLUDE"
      ,(lambda (label op operands modifier)
 	 (declare (ignore op modifier))
@@ -28,7 +37,7 @@
 				 :element-type 'unsigned-byte)
 	   (copy-stream-contents stream (current-obj-stream))
 	   (incf *program-counter* (file-position stream)))))
-    ;; Note: not DevPAC.
+
     ("ALIGN" ,(lambda (label op operands modifier)
 		 (declare (ignore op modifier))
 		 (handle-label-normally label)
@@ -41,7 +50,17 @@
 		(handle-label-normally label)
 		(unless (evenp *program-counter*)
 		  (output-data 0 8))))
-    ("CNOP") ; offset,align -- offset+(PC+align-1)&~(align-1)
+    ;; offset,align -- offset+(PC+align-1)&~(align-1)
+    ;; XXX untested.
+    ("CNOP" ,(lambda (label op operands modifier)
+		 (declare (ignore op modifier))
+		 (handle-label-normally label)
+		 (let ((offset (absolute-value (first operands)))
+		       (align (absolute-value (second operands))))
+		   (do ()
+		       ((zerop (mod (- *program-counter* offset) align)))
+		     (output-data 0 8)))))
+
     ("MACRO"
      ,(lambda (label op operands modifier)
          (declare (ignore op operands modifier))
@@ -58,8 +77,9 @@
 	 (setf *macro-buffer* (nreverse *macro-buffer*)
 	       *defining-macro-p* nil)
 	 (add-to-symbol-table (first *macro-buffer*)
-			      (list 0 (cdr *macro-buffer*))
+			      (make-asm-macro :body (cdr *macro-buffer*))
 			      :type 'macro)))
+
     ("REPT"
      ,(lambda (label op operands modifier)
          (declare (ignore label op modifier))
@@ -75,52 +95,55 @@
 	 (dotimes (i (pop *macro-buffer*))
 	   (dolist (x *macro-buffer*)
 	     (process-line x)))))
-    ("DC" ,(lambda (label op operands modifier)
-	      (declare (ignore op))
-	      (handle-label-normally label)
-	      (unless modifier (setf modifier 'word))
-	      (dolist (x operands)
-		(let ((data (absolute-value x))
-		      (length (ecase modifier (byte 8) (word 16) (long 32))))
-		  (when (consp data)
-		    (push (make-backpatch-item
-			   `((,length (absolute-value ,data)))
-			   length)
-			  *backpatch-list*)
-		    (setf data #x4E714E71))
-		  (output-data data length)))))
-    ("DS" ,(lambda (label op operands modifier)
-	      (declare (ignore op))
-	      (handle-label-normally label)
-	      (unless modifier (setf modifier 'word))
-	      (assert (eql (car (first operands)) 'absolute))
-	      (let ((data (absolute-value (first operands)))
-		    (length (ecase modifier (byte 8) (word 16) (long 32))))
-		(unless (integerp data)
-		  (error "Error at ~A: Need to be able to resolve DS immediately." *source-position*))
-		(output-data 0 (* data length)))))
+
+    ("DC" 
+     ,(lambda (label op operands modifier)
+	 (declare (ignore op))
+	 (handle-label-normally label)
+	 (unless modifier (setf modifier 'word))
+	 (dolist (x operands)
+	   (let ((data (absolute-value x))
+		 (length (ecase modifier (byte 8) (word 16) (long 32))))
+	     (when (consp data)
+	       (push (make-backpatch-item
+		      `((,length (absolute-value ,data)))
+		      length)
+		     *backpatch-list*)
+	       (setf data #x4E714E71))
+	     (output-data data length)))))
+    ("DS"
+     ,(lambda (label op operands modifier)
+	 (declare (ignore op))
+	 (handle-label-normally label)
+	 (unless modifier (setf modifier 'word))
+	 (assert (eql (car (first operands)) 'absolute))
+	 (let ((data (absolute-value (first operands)))
+	       (length (ecase modifier (byte 8) (word 16) (long 32))))
+	   (unless (integerp data)
+	     (error "~A: Need to be able to resolve DS immediately."
+		    *source-position*))
+	   (output-data 0 (* data length)))))
     ("DCB") ; constant block -- number,value
+
     ("EQU" #'define-equate)
     ("=" #'define-equate)
     ;; EQUR ? (register equate)
     ;; IFEQ etc etc
-    ("XDEF")
-    ("XREF")
-    ("ORG" ,(lambda (label op operands modifier)
-	       (declare (ignore label op modifier))
-	       (assert (eql (car (first operands)) 'absolute))
-	       (setf *program-counter* (absolute-value (first operands)))))
+
     ("END")))
 
 ;;;; MACROS
 
 ;; Devpac macros -- when we see a macro start, collect until the ENDM,
-;; so we can expand ourselves.  Note that macros have their names
-;; stored in a separate symbol table, for devpac compatibility.
+;; so we can expand ourselves.
 
 (defvar *defining-macro-p* nil)
 (defvar *defining-rept-p* nil)
 (defvar *macro-buffer*)
+
+(defstruct asm-macro
+  (count 0)
+  (body))
 
 (defun define-equate (label op operands modifier)
   (declare (ignore op modifier))
@@ -130,20 +153,12 @@
   (add-to-symbol-table label (resolve-expression (first operands))
 		       :type 'absolute))
 
-(defun macro-count (macro)
-  (first macro))
-(defun macro-body (macro)
-  (second macro))
-(defun (setf macro-count) (value macro)
-  (setf (first macro) value))
-
-
 (defun execute-macro (name operands modifier)
   (labels ((sub (match &rest registers)
 	       (declare (ignore registers))
 	       (acase (char match 1)
 		 (#\@ (format nil "_~D" 
-			      (macro-count (get-symbol-value name))))
+			      (asm-macro-count (get-symbol-value name))))
 		 (#\0 (case modifier
 			(byte ".B")
 			(long ".L")
@@ -160,14 +175,19 @@
 			  (push (seek+destroy branch) new-tree))
 			(nreverse new-tree)))
 		     (t tree))))
-      (dolist (x (macro-body (get-symbol-value name)))
+      (dolist (x (asm-macro-body (get-symbol-value name)))
 	(process-line (seek+destroy x)))
-      (incf (macro-count (get-symbol-value name)))))
+      (incf (asm-macro-count (get-symbol-value name)))))
 
 
 ;;;; SYMBOL TABLE
 
 (defvar *symbol-table* nil)
+
+(defstruct asm-symbol
+  (name)
+  (type)
+  (value))
 
 (defun maybe-local-label (sym)
   (when (and (plusp (length sym)) (eql (char sym 0) #\.))
@@ -206,29 +226,62 @@
       (second (second sym))
       (second sym)))
 
+(defun define-extern (label op operands modifier))
+(defun define-global (label op operands modifier))
+
 ;;;; BACKPATCHING
 
 (defvar *backpatch-list* nil)
 
+;; backpatch structure
+(defstruct backpatch
+  (template)
+  (length)
+  (program-counter)
+  (section)
+  (file-position)
+  (last-label)
+  (source-position))
+
 (defun make-backpatch-item (data length)
-  (list data length *program-counter*
-	*current-section* (file-position (current-obj-stream))
-	*last-label* *source-position*))
+  (make-backpatch :template data :length length
+		  :program-counter *program-counter*
+		  :section *current-section*
+		  :file-position (file-position (current-obj-stream))
+		  :last-label *last-label*
+		  :source-position *source-position*))
+
+(defmacro with-backpatch ((item) &body body)
+  `(let ((*program-counter* (backpatch-program-counter ,item))
+	 (*current-section* (backpatch-section ,item))
+	 (*last-label* (backpatch-last-label ,item))
+	 (*source-position* (backpatch-source-position ,item)))
+    ,@body))
 
 (defun backpatch ()
   ;; go through backpatch list, try to make all patches
   (dolist (x *backpatch-list*)
-    (destructuring-bind (template length *program-counter*
-				  *current-section*
-				  file-position *last-label* 
-				  *source-position*) x
-      (multiple-value-bind (data len) (generate-code template nil nil)
+    (with-backpatch (x)
+      (multiple-value-bind (data len)
+	  (generate-code (backpatch-template x) nil nil)
 	(when (consp data)
-	  (error "Failed to backpatch @ ~A/~A: ~S."
-		 *program-counter* *source-position* data))
-	(assert (= len length))
-	(assert (file-position (current-obj-stream) file-position))
+	  (error "~A: Failed to backpatch @ ~A: ~S."
+		 *source-position* *program-counter* data))
+	(assert (= len (backpatch-length x)))
+	(assert (file-position (current-obj-stream)
+			       (backpatch-file-position x)))
 	(output-data data len)))))
+
+
+;;;; RELOCATION
+
+;; relocation info
+(defstruct relocation
+  (address)
+  (extern-p)
+  (pc-relative-p)
+  (symbol)
+  (segment))
 
 
 ;;;; HELPER FUNCTIONS
@@ -276,13 +329,7 @@ resolved."
 
 ;;;; "MAIN" STUFF
 
-;;; XXX should this be maintained by the lexer instead?
-(defvar *file-list* nil
-  "Stack of file names that are actively open; checked by INCLUDE to
-determine whether recursive nesting is occuring.")
-
 (defvar *source-position*)
-
 (defvar *object-streams*)
 (defvar *program-counter*)
 (defvar *last-label* nil "Last label seen by the assembler.  This is

@@ -19,11 +19,17 @@ Things to add in the assembler:
 
 CL-style macros?  (that would be cool!)
 Checking ranges of types, signed indices, etc.
+	Also, type checking information stored in the symbol table.
 Verify that BSS contains only zeros.
 Support for later chips in the m68k line, and enabling/disabling
 	allowance of their added instructions.
 Nifty local labels a-la GNU as or similar.  (0f, 1b, etc)
 Optimizations/data flow analysis.
+Output listings (with cycle counts, et cetera).
+Debugger info.
+Output in object formats other than A.OUT.
+Change lookup tables so that on load, they get converted to hash
+	tables or whatever's appropriate.
 
 
 Things to add in the linker:
@@ -33,27 +39,33 @@ uh, the whole linker. ;-)
 Atari ST bootfloppy target.
 Atari ST PRG target.
 linker scripts.
+Optimizing linker ideas (see Levine's Linkers and Loaders).
 
 
 THINGS TO DO BEFORE RELEASE
 
 - remove debugging output.
 - add a decent warning/error display and logging system.
-- temp-files/osicat.
 - compile list of known issues, try to resolve.
 - start converting improvised list structure into real structures or
   objects.
+- put together a basic automated test suite.
+- skim all XXXs.
 
 
 KNOWN ISSUES
 
-- macro parameters are broken.  need to keep the strings of the
-  operands around, operate on them, then feed them through the lexer
-  and parser "late".  This includes \0.
-- addq/subq are broken with immediate value #8. [codegen]
+- macro parameters are broken.  At least, <foo> style ones are still
+  broken.  [assembler]
+- ADDQ/SUBQ are broken with immediate value #8. [codegen]
 - no checking of vconstraints yet. [codegen]
 - DC.B should handle strings properly (right now it will probably only
   write out the last byte). [assembler]
+- Unfinished pseudo-ops:
+	EQUR
+	DCB
+	END
+	IFxx
 
 
 KNOWN MAJOR INCOMPATIBILITIES WITH DEVPAC
@@ -64,3 +76,10 @@ Macros:
 
 - we don't support < or > embedded in macro parameters which are
   already wrapped in < and >.  (eg: "<foo>>>>2>" => "foo>>2") [lexer]
+
+
+ENHANCEMENTS FROM DEVPAC
+
+- We support EXTERN/GLOBAL as synonyms for XREF/XDEF,
+  respectively.  Also ALIGN as a simple version of CNOP.
+
