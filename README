@@ -17,30 +17,20 @@ Literate input.
 
 Things to add in the assembler:
 
-Add better PC-relative stuff (.+6 or *+42 notation f.ex).
-CL-style macros?  (that would be cool!)
+Verify that BSS contains only zeros.
 Checking ranges of types, signed indices, etc.
 	Also, type checking information stored in the symbol table.
-Verify that BSS contains only zeros.
+Output listings (with cycle counts, et cetera).
+Add better PC-relative stuff (.+6 or *+42 notation f.ex).
 Support for later chips in the m68k line, and enabling/disabling
 	allowance of their added instructions.
-Nifty local labels a-la GNU as or similar.  (0f, 1b, etc)
-Optimizations/data flow analysis.
-Output listings (with cycle counts, et cetera).
-Debugger info.
-Output in object formats other than A.OUT.
 Change lookup tables so that on load, they get converted to hash
 	tables or whatever's appropriate.
-
-
-Things to add in the linker:
-
-[see st-linker/]
-uh, the whole linker. ;-)
-Atari ST bootfloppy target.
-Atari ST PRG target.
-linker scripts.
-Optimizing linker ideas (see Levine's Linkers and Loaders).
+Nifty local labels a-la GNU as or similar.  (0f, 1b, etc)
+CL-style macros?  (that would be cool!)
+Debugger info.
+Output in object formats other than A.OUT.
+Optimizations/data flow analysis.
 
 
 THINGS TO DO BEFORE RELEASE

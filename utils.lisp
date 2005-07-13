@@ -33,7 +33,7 @@ an integer.  LENGTH must be a multiple of 8."
   (do ((pos (- length 8) (- pos 8))
        (value (read-byte stream) (logior (read-byte stream)
 					 (ash value 8))))
-      ((< pos 0))))
+      ((<= pos 0) value)))
 
 (defun write-big-endian-data (stream data length)
   "Write LENGTH bits of the integer DATA to STREAM, in big-endian

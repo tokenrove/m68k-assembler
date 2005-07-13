@@ -13,32 +13,32 @@ patch header)."
 				 :element-type 'unsigned-byte
 				 :if-exists :new-version
 				 :if-does-not-exist :create)
-    (write-big-endian-data output-stream #x53544F26 32) ; Magic
-    ;; Text, Data, BSS
-    (mapcar (lambda (x)
-	      (write-big-endian-data output-stream (cdr x) 32))
-	    section-lengths)
-    ;; symbol table
-    (write-big-endian-data output-stream
-			   (hash-table-count *symbol-table*)
-			   32)
-    ;; entry point
-    (write-big-endian-data output-stream 0 32)
-    ;; text reloc size
-    (write-big-endian-data output-stream
-			   (hash-table-count *relocation-table*)
-			   32)
-    ;; data reloc size
-    (write-big-endian-data output-stream
-			   0
-			   32)
-
-    (copy-stream-contents (cdr (assoc 'text *object-streams*))
-			  output-stream)
-    (copy-stream-contents (cdr (assoc 'data *object-streams*))
-			  output-stream)
     ;; revise symbol table/relocs to use numeric indices
     (let* ((symbols (serialize-symbol-table)))
+      (write-big-endian-data output-stream #x53544F26 32) ; Magic
+      ;; Text, Data, BSS
+      (mapcar (lambda (x)
+		(write-big-endian-data output-stream
+				       (cdr (assoc x section-lengths))
+				       32))
+	      '(text data bss))
+      ;; symbol table
+      (write-big-endian-data output-stream (length symbols) 32)
+      ;; entry point
+      (write-big-endian-data output-stream 0 32)
+      ;; text reloc size
+      (write-big-endian-data output-stream
+			     (hash-table-count *relocation-table*)
+			     32)
+      ;; data reloc size
+      (write-big-endian-data output-stream
+			     0
+			     32)
+
+      (copy-stream-contents (cdr (assoc 'text *object-streams*))
+			    output-stream)
+      (copy-stream-contents (cdr (assoc 'data *object-streams*))
+			    output-stream)
       ;; output relocations
       (maphash (lambda (k v)
 		 (declare (ignore k))
