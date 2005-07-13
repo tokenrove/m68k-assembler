@@ -32,16 +32,6 @@
 		       absolute-long pc-displacement pc-index))
     (absolute (absolute-short absolute-long))))
 
-; memory-alterable-modes -> indirect-modes + absolute
-; data-alterable-modes -> memory-alterable-modes + data-register
-; alterable-modes -> data-alterable-modes + address-register
-
-; data-addressing-modes -> all-ea-modes - address-register
-
-; control-addressing-modes -> all-ea-modes - (registers + immediate +
-;                                          postincrement-indirect +
-;                                          predecrement-indirect)
-
 
 ;; transforms...
 ;;    displacement-indirect w/o expression => vanilla-indirect
@@ -49,11 +39,11 @@
 ;;    register aX => address-register
 ;;    indirect w/pc => pc-indexed or pc-displacement
 
-(defun refine-type (operand)
+(defun refine-type (operand modifier)
   (cond 
     ;; XXX: should try to evaluate expression if it exists.
     ((and (eql (car operand) 'displacement-indirect)
-	  (zerop (indirect-displacement operand))
+	  (zerop (indirect-displacement operand 'word))
 	  (address-register-p (indirect-base-register operand)))
      'vanilla-indirect)
     ((eql (car operand) 'register)
@@ -64,31 +54,34 @@
     ;; XXX: not sure if this is reasonable behavior, but it seems ok
     ;; to me.
     ((eql (car operand) 'absolute)
-     (if (absolute-definitely-needs-long-p operand)
-	 'absolute-long
-	 'absolute-short))
+     (case modifier
+       (word 'absolute-short) (long 'absolute-long)
+       (t (if (absolute-definitely-needs-long-p operand)
+	      'absolute-long
+	      'absolute-short))))
     (t (car operand))))
 
-(defun operand-type-matches-constraint-type-p (operand constraint)
-  (let ((refined-op (refine-type operand)))
+(defun operand-type-matches-constraint-type-p (operand constraint modifier)
+  (let ((refined-op (refine-type operand modifier)))
     (aif (find (car constraint) *constraints-modes-table* :key #'car)
 	 (member refined-op (second it))
 	 (eql refined-op (car constraint)))))
 
-(defun satisfies-operand-constraints-p (operands constraints)
+(defun satisfies-operand-constraints-p (operands constraints modifier)
   (when (equal (length operands) (length constraints))
     (do ((op-> operands (cdr op->))
 	 (co-> constraints (cdr co->)))
 	((and (null op->) (null co->)) t)
       (unless (operand-type-matches-constraint-type-p (car op->)
-						      (car co->))
+						      (car co->)
+						      modifier)
 	(return nil))
       (dolist (v-constraint (cdar co->))
 	(format t "~&v-constraint: ~A" v-constraint)))))
 
 (defun satisfies-modifier-constraints-p (modifier mod-list)
   (cond ((null mod-list) (null modifier))
-	((null modifier) t) ;; for the moment
+	((null modifier) t) ;; XXX for the moment
 	(t (member modifier mod-list))))
 
 
@@ -103,7 +96,8 @@
 	   (when (and (satisfies-modifier-constraints-p modifier
 							(caar entry))
 		      (satisfies-operand-constraints-p operands
-						       (cdar entry)))
+						       (cdar entry)
+						       modifier))
 	     (return entry)))
 	  (t (error "Bad entry in opcode table: ~A: ~A" opcode entry)))))
 
@@ -146,10 +140,12 @@ signalled."
 (defun indirect-index-register (operand)
   (assert (eql (car operand) 'indexed-indirect))
   (find 'register (cdr operand) :from-end t :key #'carat))
-(defun indirect-displacement (operand)
-  (cond ((integerp (cadr operand)) (cadr operand))
-	((not (eql (caadr operand) 'expression)) 0)
-	(t (resolve-expression (cadr operand)))))
+(defun indirect-displacement (operand modifier)
+  (let ((length (case modifier (byte 8) (word 16))))
+    (cond ((integerp (cadr operand)) (cadr operand))
+	  ((not (eql (caadr operand) 'expression)) 0)
+	  (t (prog1 (resolve-expression (cadr operand))
+	       (fix-relocation-size length))))))
 
 (defun register-mask-list (operand &key flipped-p)
   (let ((bitmask (make-array '(16) :element-type 'bit :initial-element 0)))
@@ -163,7 +159,7 @@ signalled."
     (values (bit-vector->int (if flipped-p (nreverse bitmask) bitmask))
 	    16)))
 
-(defun effective-address-mode (operand &key (flipped-p nil))
+(defun effective-address-mode (operand modifier &key (flipped-p nil))
   "Calculates the classic six-bit effective address mode and register
 values.  If FLIPPED-P, returns the mode and register values swapped."
   (flet ((combine (m r)
@@ -179,7 +175,7 @@ values.  If FLIPPED-P, returns the mode and register values swapped."
        (displacement-indirect
 	(let ((base (indirect-base-register operand)))
 	  (cond ((pc-register-p base) (combine #b111 #b010))
-		((eql (refine-type operand) 'vanilla-indirect)
+		((eql (refine-type operand modifier) 'vanilla-indirect)
 		 (combine #b010 (register-idx base)))
 		(t (combine #b101 (register-idx base))))))
        (indexed-indirect
@@ -187,7 +183,7 @@ values.  If FLIPPED-P, returns the mode and register values swapped."
 	  (cond ((pc-register-p base) (combine #b111 #b011))
 		(t (combine #b110 (register-idx base))))))
        (absolute
-	(ecase (refine-type operand)
+	(ecase (refine-type operand modifier)
 	  (absolute-short (combine #b111 #b000))
 	  (absolute-long (combine #b111 #b001))))
        (immediate (combine #b111 #b100))
@@ -203,9 +199,9 @@ the length of that data."
   (ecase (car operand)
     (register (values 0 0))
     (displacement-indirect
-     (if (eql (refine-type operand) 'vanilla-indirect)
+     (if (eql (refine-type operand modifier) 'vanilla-indirect)
 	 (values 0 0)
-	 (values (indirect-displacement operand) 16)))
+	 (values (indirect-displacement operand 'word) 16)))
     (indexed-indirect
      (let ((index (indirect-index-register operand)))
        (if (not (pc-register-p (indirect-base-register operand)))
@@ -214,13 +210,14 @@ the length of that data."
 			   (if (aand (register-modifier index)
 				     (eql it 'long))
 			       (ash #b1 11) 0)
-			   (logand (indirect-displacement operand) #xff))
+			   (logand (indirect-displacement operand 'byte)
+				   #xff))
 		   16)
 	   (error "Not sure how to encode this!")))) ;XXX
     (absolute
-      (ecase (refine-type operand)
-	(absolute-short (values (absolute-value operand) 16))
-	(absolute-long (values (absolute-value operand) 32))))
+      (ecase (refine-type operand modifier)
+	(absolute-short (values (absolute-value operand 'word) 16))
+	(absolute-long (values (absolute-value operand 'long) 32))))
     ;; XXX test extent of value
     (immediate (values (immediate-value operand)
 		       (if (eql modifier 'long) 32 16)))
@@ -228,12 +225,13 @@ the length of that data."
     (predecrement-indirect (values 0 0))))
 
 ;; XXX this name sucks (too much like ABS)
-(defun absolute-value (operand)
-  ;; XXX deal with short and long
-  (when (and (consp operand)
-	     (eql (first operand) 'absolute))
-    (setf operand (second operand)))
-  (values (resolve-expression operand) 16))
+(defun absolute-value (operand &optional (modifier 'word))
+  (let ((length (ecase modifier (byte 8) (long 32) (word 16))))
+    (when (and (consp operand) (eql (first operand) 'absolute))
+      (setf operand (second operand)))
+    (values (prog1 (resolve-expression operand)
+	      (fix-relocation-size length))
+	    length)))
 
 ;;; XXX defaults to nil.
 (defun absolute-definitely-needs-long-p (operand)
@@ -244,8 +242,16 @@ the length of that data."
 (defun immediate-value (operand &optional modifier)
   "Returns a certain number of bits from the immediate value of
 OPERAND, based on MODIFIER, if specified."
-  (values (resolve-expression (second operand))
-	  (case modifier (byte 8) (word 16) (long 32) (t '?))))
+  (let ((length (case modifier (byte 8) (word 16) (long 32) (t '?))))
+    (values (prog1 (resolve-expression (second operand))
+	      (fix-relocation-size length))
+	    length)))
+
+(defun addq-immediate-value (operand &optional modifier)
+  "Special hack for ADDQ/SUBQ.  Returns OPERAND mod 8 and the rest as
+per IMMEDIATE-VALUE."
+  (multiple-value-bind (v l) (immediate-value operand modifier)
+    (values (mod v 8) l)))
 
 (defun modifier-bits (modifier)
   (values (ecase modifier (byte #b00) (word #b01) (long #b10)) 2))
@@ -259,15 +265,21 @@ OPERAND, based on MODIFIER, if specified."
 :DB-P is T, calculate displacement as per the DBcc opcodes (always
 16-bit).  Otherwise, calculate displacement as per Bcc opcodes, where
 displacement is either 8 bits or 16 padded to 24."
-  (let ((value (absolute-value operand)))
+  (let ((value (absolute-value operand (or modifier
+					   (if db-p 'word 'byte))))
+	(length (cond (db-p 16)
+		      ((eql modifier 'word) 24)	;XXX should zero top 8 bits.
+		      (t 8))))
+    ;; if there's a reloc at this pc, change to pc-relative
+    (pc-relativise-relocation)
+    (fix-relocation-size length)
+
     ;; Note PC+2 -- this is due to the way the m68k fetches
-    ;; instructions.
+    ;; instructions. XXX
     (values (or (and (integerp value)
 		     (- value (+ *program-counter* 2)))
 		value)
-	    (cond (db-p 16)
-		  ((eql modifier 'word) 24) ;XXX should zero top 8 bits.
-		  (t 8)))))
+	    length)))
 
 
 ;;;; TEMPLATE EVALUATOR
@@ -283,17 +295,25 @@ displacement is either 8 bits or 16 padded to 24."
 
 (defun fill-codegen-template (list)
   (do* ((item-> list (cdr item->))
+	(fake-pc *program-counter* (+ fake-pc (/ length 8)))
 	(length (caar item->) (caar item->))
 	(formula (cadar item->) (cadar item->))
 	(done-p t))
        ((null item->) done-p)
     (when (consp formula)
-      (multiple-value-bind (val val-len) (apply (car formula) (cdr formula))
-	(unless (integerp length) (setf (caar item->) val-len))
-	(when (integerp val-len) (assert (= (caar item->) val-len)))
-	(if (integerp val)
-	    (setf (cadar item->) val)
-	    (setf done-p nil))))))
+      ;; We don't floor fake-pc because it should point out
+      ;; interesting bugs if we ever have to make use of it when it's
+      ;; not an integer.
+      (let ((*program-counter* fake-pc))
+	(multiple-value-bind (val val-len) (apply (car formula)
+						  (cdr formula))
+	  (unless (integerp length)
+	    (setf length val-len)	; for fake-pc
+	    (setf (caar item->) val-len))
+	  (when (integerp val-len) (assert (= (caar item->) val-len)))
+	  (if (integerp val)
+	      (setf (cadar item->) val)
+	      (setf done-p nil)))))))
 
 ;;; first do the sublis, then walk through each item doing the
 ;;; evaluation when we can.  if everything's reduced to an atom,
@@ -303,6 +323,7 @@ displacement is either 8 bits or 16 padded to 24."
 ;; if the first is an integer, add it to the result-length.  if the
 ;; second is an atom, or it into the result.  if the second is a list,
 ;; evaluate it with first-operand, second-operand, and modifier bound.
+
 (defun generate-code (template operands modifier)
   (let ((result 0)
 	(result-len 0)

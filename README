@@ -17,6 +17,7 @@ Literate input.
 
 Things to add in the assembler:
 
+Add better PC-relative stuff (.+6 or *+42 notation f.ex).
 CL-style macros?  (that would be cool!)
 Checking ranges of types, signed indices, etc.
 	Also, type checking information stored in the symbol table.
@@ -50,14 +51,24 @@ THINGS TO DO BEFORE RELEASE
 - start converting improvised list structure into real structures or
   objects.
 - put together a basic automated test suite.
+  (once object format has settled down, start a set of regression files,
+   with sane output verified by hand.)
 - skim all XXXs.
+- once a better warning system is in place, allow routines like
+MODIFIER-BITS to guess the size of underspecified operations, and warn
+about them at suitable warning levels.
+- test with sourcer68 output of various files.
+- Things to test about relocation:
+	are 8-bit indirect displacements being relocated correctly?
+	verify all possible relocation combinations.	
+- Update dependencies in ASDF file so that it compiles without warnings.
+
 
 
 KNOWN ISSUES
 
 - macro parameters are broken.  At least, <foo> style ones are still
   broken.  [assembler]
-- ADDQ/SUBQ are broken with immediate value #8. [codegen]
 - no checking of vconstraints yet. [codegen]
 - DC.B should handle strings properly (right now it will probably only
   write out the last byte). [assembler]
@@ -66,6 +77,8 @@ KNOWN ISSUES
 	DCB
 	END
 	IFxx
+- branch-displacement-bits will behave badly in some unusual situations.
+- data segment relocations are unsupported.
 
 
 KNOWN MAJOR INCOMPATIBILITIES WITH DEVPAC

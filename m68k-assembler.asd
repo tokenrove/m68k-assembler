@@ -13,6 +13,7 @@
    (:file "parser" :depends-on ("package"))
    (:file "ast" :depends-on ("package"))
    (:file "codegen" :depends-on ("package"))
-   (:file "assembler" :depends-on ("package"))))
+   (:file "assembler" :depends-on ("package"))
+   (:file "aout" :depends-on ("package"))))
 
 ;;; XXX add stuff to build parser here

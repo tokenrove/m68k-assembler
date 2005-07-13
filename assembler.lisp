@@ -3,143 +3,150 @@
 
 ;;;; PSEUDO-OPS
 
-(defparameter *asm-pseudo-op-table*
-  `(("SECTION" ,(lambda (label op operands modifier)
-		  (declare (ignore op modifier))
-		  (handle-label-normally label)
-		  (assert (and (eql (caar operands) 'absolute)
-			       (eql (caadar operands) 'symbol)))
-		  (let ((section (intern (cadar (cdar operands))
-					 (find-package "M68K-ASSEMBLER"))))
-		    (assert (assoc section *object-streams*))
-		    (setf *current-section* section))))
-    ("XDEF" #'define-global)
-    ("GLOBAL" #'define-global)
-    ("XREF" #'define-extern)
-    ("EXTERN" #'define-extern)
-    ("ORG" ,(lambda (label op operands modifier)
-	       (declare (ignore label op modifier))
-	       (assert (eql (car (first operands)) 'absolute))
-	       (setf *program-counter* (absolute-value (first operands)))))
+(eval-when (:compile-toplevel :load-toplevel)
+  (defparameter *asm-pseudo-op-table*
+    `(("SECTION" ,(lambda (label op operands modifier)
+			  (declare (ignore op modifier))
+			  (handle-label-normally label)
+			  (assert (and (eql (caar operands) 'absolute)
+				       (eql (caadar operands) 'symbol)))
+			  (let ((section (intern (cadar (cdar operands))
+						 (find-package "M68K-ASSEMBLER"))))
+			    (assert (assoc section *object-streams*))
+			    (setf *current-section* section))))
+      ("XDEF" #'define-global)
+      ("GLOBAL" #'define-global)
+      ("XREF" #'define-extern)
+      ("EXTERN" #'define-extern)
+      ("ORG" ,(lambda (label op operands modifier)
+		      (declare (ignore label op modifier))
+		      (assert (eql (car (first operands)) 'absolute))
+		      (setf *program-counter* (absolute-value (first operands)))))
 
-    ("INCLUDE"
-     ,(lambda (label op operands modifier)
-	 (declare (ignore op modifier))
-	 (handle-label-normally label)
-	 (nested-lexing (extract-string-from-operand (first operands)))))
-    ("INCBIN"
-     ,(lambda (label op operands modifier)
-	 (declare (ignore op modifier))
-	 (handle-label-normally label)
-	 (with-open-file (stream (extract-string-from-operand
-				  (first operands))
-				 :direction :input
-				 :element-type 'unsigned-byte)
-	   (copy-stream-contents stream (current-obj-stream))
-	   (incf *program-counter* (file-position stream)))))
-
-    ("ALIGN" ,(lambda (label op operands modifier)
-		 (declare (ignore op modifier))
-		 (handle-label-normally label)
-		 (let ((align (absolute-value (first operands))))
-		   (do ()
-		       ((zerop (mod *program-counter* align)))
-		     (output-data 0 8)))))
-    ("EVEN" ,(lambda (label op operands modifier)
-		(declare (ignore op modifier operands))
+      ("INCLUDE"
+       ,(lambda (label op operands modifier)
+		(declare (ignore op modifier))
 		(handle-label-normally label)
-		(unless (evenp *program-counter*)
-		  (output-data 0 8))))
-    ;; offset,align -- offset+(PC+align-1)&~(align-1)
-    ;; XXX untested.
-    ("CNOP" ,(lambda (label op operands modifier)
-		 (declare (ignore op modifier))
-		 (handle-label-normally label)
-		 (let ((offset (absolute-value (first operands)))
-		       (align (absolute-value (second operands))))
-		   (do ()
-		       ((zerop (mod (- *program-counter* offset) align)))
-		     (output-data 0 8)))))
+		(nested-lexing (extract-string-from-tree (first operands)))))
+      ("INCBIN"
+       ,(lambda (label op operands modifier)
+		(declare (ignore op modifier))
+		(handle-label-normally label)
+		(with-open-file (stream (extract-string-from-tree
+					 (first operands))
+					:direction :input
+					:element-type 'unsigned-byte)
+		  (copy-stream-contents stream (current-obj-stream))
+		  (incf *program-counter* (file-position stream)))))
 
-    ("MACRO"
-     ,(lambda (label op operands modifier)
-         (declare (ignore op operands modifier))
-	 ;; if *defining-macro-p* is already set, cry foul.
-	 (assert (not *defining-macro-p*))
-	 (assert label)
-         ;; otherwise, clear out *macro-buffer*.
-	 (setf *macro-buffer* (list (second label))
-	       *defining-macro-p* t)))
-    ("ENDM"
-     ,(lambda (label op operands modifier)
-         (declare (ignore label op operands modifier))
-	 (assert *defining-macro-p*)
-	 (setf *macro-buffer* (nreverse *macro-buffer*)
-	       *defining-macro-p* nil)
-	 (add-to-symbol-table (first *macro-buffer*)
-			      (make-asm-macro :body (cdr *macro-buffer*))
-			      :type 'macro)))
+      ("ALIGN" ,(lambda (label op operands modifier)
+			(declare (ignore op modifier))
+			(handle-label-normally label)
+			(let ((align (absolute-value (first operands))))
+			  (do ()
+			      ((zerop (mod *program-counter* align)))
+			    (output-data 0 8)))))
+      ("EVEN" ,(lambda (label op operands modifier)
+		       (declare (ignore op modifier operands))
+		       (handle-label-normally label)
+		       (unless (evenp *program-counter*)
+			 (output-data 0 8))))
+      ;; offset,align -- offset+(PC+align-1)&~(align-1)
+      ;; XXX untested.
+      ("CNOP" ,(lambda (label op operands modifier)
+		       (declare (ignore op modifier))
+		       (handle-label-normally label)
+		       (let ((offset (absolute-value (first operands)))
+			     (align (absolute-value (second operands))))
+			 (do ()
+			     ((zerop (mod (- *program-counter* offset) align)))
+			   (output-data 0 8)))))
 
-    ("REPT"
-     ,(lambda (label op operands modifier)
-         (declare (ignore label op modifier))
-	 (assert (not *defining-rept-p*))
-	 (setf *macro-buffer* (list (absolute-value (first operands)))
-	       *defining-rept-p* t)))
-    ("ENDR"
-     ,(lambda (label op operands modifier)
-         (declare (ignore label op operands modifier))
-	 (assert *defining-rept-p*)
-	 (setf *macro-buffer* (nreverse *macro-buffer*)
-	       *defining-rept-p* nil)
-	 (dotimes (i (pop *macro-buffer*))
-	   (dolist (x *macro-buffer*)
-	     (process-line x)))))
+      ("MACRO"
+       ,(lambda (label op operands modifier)
+		(declare (ignore op operands modifier))
+		;; if *defining-macro-p* is already set, cry foul.
+		(assert (not *defining-macro-p*))
+		(assert label)
+		;; otherwise, clear out *macro-buffer*.
+		(setf *macro-buffer* (list (second label))
+		      *defining-macro-p* t)))
+      ("ENDM"
+       ,(lambda (label op operands modifier)
+		(declare (ignore label op operands modifier))
+		(assert *defining-macro-p*)
+		(setf *macro-buffer* (nreverse *macro-buffer*)
+		      *defining-macro-p* nil)
+		(add-to-symbol-table (first *macro-buffer*)
+				     (make-asm-macro :body (cdr *macro-buffer*))
+				     :type 'macro)))
 
-    ("DC" 
-     ,(lambda (label op operands modifier)
-	 (declare (ignore op))
-	 (handle-label-normally label)
-	 (unless modifier (setf modifier 'word))
-	 (dolist (x operands)
-	   (let ((data (absolute-value x))
-		 (length (ecase modifier (byte 8) (word 16) (long 32))))
-	     (when (consp data)
-	       (push (make-backpatch-item
-		      `((,length (absolute-value ,data)))
-		      length)
-		     *backpatch-list*)
-	       (setf data #x4E714E71))
-	     (output-data data length)))))
-    ("DS"
-     ,(lambda (label op operands modifier)
-	 (declare (ignore op))
-	 (handle-label-normally label)
-	 (unless modifier (setf modifier 'word))
-	 (assert (eql (car (first operands)) 'absolute))
-	 (let ((data (absolute-value (first operands)))
-	       (length (ecase modifier (byte 8) (word 16) (long 32))))
-	   (unless (integerp data)
-	     (error "~A: Need to be able to resolve DS immediately."
-		    *source-position*))
-	   (output-data 0 (* data length)))))
-    ("DCB") ; constant block -- number,value
+      ("REPT"
+       ,(lambda (label op operands modifier)
+		(declare (ignore label op modifier))
+		(assert (not *defining-rept-p*))
+		(setf *macro-buffer* (list (absolute-value (first operands)))
+		      *defining-rept-p* t)))
+      ("ENDR"
+       ,(lambda (label op operands modifier)
+		(declare (ignore label op operands modifier))
+		(assert *defining-rept-p*)
+		(setf *macro-buffer* (nreverse *macro-buffer*)
+		      *defining-rept-p* nil)
+		(dotimes (i (pop *macro-buffer*))
+		  (dolist (x *macro-buffer*)
+		    (process-line x)))))
 
-    ("EQU" #'define-equate)
-    ("=" #'define-equate)
-    ;; EQUR ? (register equate)
-    ;; IFEQ etc etc
+      ("DC" 
+       ,(lambda (label op operands modifier)
+		(declare (ignore op))
+		(handle-label-normally label)
+		(unless modifier (setf modifier 'word))
+		(dolist (x operands)
+		  (let ((data (absolute-value x modifier))
+			(length (ecase modifier (byte 8) (word 16) (long 32))))
+		    (when (consp data)
+		      (push (make-backpatch-item
+			     `((,length (absolute-value ,data ,modifier)))
+			     length)
+			    *backpatch-list*)
+		      (setf data #x4E714E71))
+		    (output-data data length)))))
+      ("DS"
+       ,(lambda (label op operands modifier)
+		(declare (ignore op))
+		(handle-label-normally label)
+		(unless modifier (setf modifier 'word))
+		(assert (eql (car (first operands)) 'absolute))
+		(let ((data (absolute-value (first operands) modifier))
+		      (length (ecase modifier (byte 8) (word 16) (long 32))))
+		  (unless (integerp data)
+		    (error "~A: Need to be able to resolve DS immediately."
+			   *source-position*))
+		  (output-data 0 (* data length)))))
+      ("DCB")			      ; constant block -- number,value
 
-    ("END")))
+      ("EQU" #'define-equate)
+      ("=" #'define-equate)
+      ;; EQUR (register equate)
+      ;; IFEQ etc etc
+
+      ("END"))))
+
+(defun pseudo-op-p (string)
+  (or (find string *asm-pseudo-op-table* :key #'car :test #'string-equal)
+      (eql (get-symbol-type string) 'macro)))
+
 
 ;;;; MACROS
 
 ;; Devpac macros -- when we see a macro start, collect until the ENDM,
 ;; so we can expand ourselves.
 
-(defvar *defining-macro-p* nil)
-(defvar *defining-rept-p* nil)
-(defvar *macro-buffer*)
+(eval-when (:compile-toplevel :load-toplevel)
+  (defvar *defining-macro-p* nil)
+  (defvar *defining-rept-p* nil)
+  (defvar *macro-buffer*))
 
 (defstruct asm-macro
   (count 0)
@@ -182,52 +189,70 @@
 
 ;;;; SYMBOL TABLE
 
-(defvar *symbol-table* nil)
+(eval-when (:compile-toplevel :load-toplevel)
+  (defvar *symbol-table* nil))
 
 (defstruct asm-symbol
   (name)
   (type)
-  (value))
+  (value)
+  (debug-info)
+  (global-p nil))
 
-(defun maybe-local-label (sym)
-  (when (and (plusp (length sym)) (eql (char sym 0) #\.))
-    (concatenate 'string *last-label* sym)))
+(defun local-label-name-p (name)
+  (and (plusp (length name)) (eql (char name 0) #\.)))
 
-(defun add-to-symbol-table (sym value &key (type 'relative))
-  (cond ((consp sym)
-	 (when (eql (first sym) 'label) (setf sym (second sym)))
-	 (assert (eql (first sym) 'symbol))
-	 (when (eql type 'relative)
-	   (aif (maybe-local-label (second sym))
-		(setf (second sym) it)
-		(setf *last-label* (second sym))))
-	 (setf (gethash (second sym) *symbol-table*)
-	       (list type value *source-position*)))
-	(t (error "Not sure how to handle this symbol: ~A." sym))))
+(defun maybe-local-label (name)
+  (if (local-label-name-p name)
+      (concatenate 'string *last-label* name)
+      name))
+
+(defun add-to-symbol-table (sym value &key (type *current-section*)
+			    (global-p nil))
+  (let ((name (extract-sym-name sym)))
+    (setf (gethash name *symbol-table*)
+	  (make-asm-symbol :name name
+			   :type type
+			   :value value
+			   :debug-info *source-position*
+			   :global-p global-p))))
 
 (defun get-symbol-value (sym)
-  (when (consp sym)
-    (when (eql (first sym) 'label) (setf sym (second sym)))
-    (setf sym (second sym)))
-  (awhen (or (gethash sym *symbol-table*)
-	     (gethash (maybe-local-label sym) *symbol-table*))
-    (second it)))
+  (awhen (get-asm-symbol sym) (asm-symbol-value it)))
+
+(defun (setf get-symbol-value) (value sym)
+  (setf (asm-symbol-value (get-asm-symbol sym)) value))
 
 (defun get-symbol-type (sym)
-  (when (consp sym)
-    (when (eql (first sym) 'label) (setf sym (second sym)))
-    (setf sym (second sym)))
-  (awhen (or (gethash sym *symbol-table*)
-	     (gethash (maybe-local-label sym) *symbol-table*))
-    (first it)))
+  (awhen (get-asm-symbol sym) (asm-symbol-type it)))
 
-(defun asm-symbol-text (sym)
-  (if (eql (car sym) 'absolute)
-      (second (second sym))
-      (second sym)))
+(defun get-asm-symbol (sym)
+  (setf sym (extract-sym-name sym))
+  (gethash sym *symbol-table*))
 
-(defun define-extern (label op operands modifier))
-(defun define-global (label op operands modifier))
+(defun extract-sym-name (sym)
+  (maybe-local-label (cond ((atom sym) sym)
+			   ((or (eql (car sym) 'absolute)
+				(eql (car sym) 'label))
+			    (second (second sym)))
+			   (t (second sym)))))
+
+(defun define-extern (label op operands modifier)
+  (declare (ignore op modifier))
+  ;; add whatever to the symbol table, as an extern
+  (handle-label-normally label)
+  (let ((name (extract-string-from-tree (first operands))))
+    (add-to-symbol-table name nil :type 'extern :global-p t)))
+
+(defun define-global (label op operands modifier)
+  (declare (ignore op modifier))
+  ;; add whatever to the symbol table, or just tweak
+  ;; its type if necessary.
+  (handle-label-normally label)
+  (let ((name (extract-string-from-tree (first operands))))
+    (aif (get-asm-symbol name)
+	 (setf (asm-symbol-global-p it) t) ; XXX hope this works.
+	 (add-to-symbol-table name nil :global-p t))))
 
 ;;;; BACKPATCHING
 
@@ -262,15 +287,16 @@
   ;; go through backpatch list, try to make all patches
   (dolist (x *backpatch-list*)
     (with-backpatch (x)
-      (multiple-value-bind (data len)
-	  (generate-code (backpatch-template x) nil nil)
-	(when (consp data)
-	  (error "~A: Failed to backpatch @ ~A: ~S."
-		 *source-position* *program-counter* data))
-	(assert (= len (backpatch-length x)))
-	(assert (file-position (current-obj-stream)
-			       (backpatch-file-position x)))
-	(output-data data len)))))
+      (let ((*defining-relocations-p* t))
+	(multiple-value-bind (data len)
+	    (generate-code (backpatch-template x) nil nil)
+	  (when (consp data)
+	    (error "~A: Failed to backpatch @ ~A: ~S."
+		   *source-position* *program-counter* data))
+	  (assert (= len (backpatch-length x)))
+	  (assert (file-position (current-obj-stream)
+				 (backpatch-file-position x)))
+	  (output-data data len))))))
 
 
 ;;;; RELOCATION
@@ -278,19 +304,65 @@
 ;; relocation info
 (defstruct relocation
   (address)
-  (extern-p)
-  (pc-relative-p)
-  (symbol)
-  (segment))
+  (size nil)
+  (extern-p nil)
+  (pc-relative-p nil)
+  ;; only one of symbol or segment can be selected at a time, so the
+  ;; symbol field provides both functions.
+  (symbol))
+
+(defun relocation-segment (r) (relocation-symbol r))
+(defun (setf relocation-segment) (v r) (setf (relocation-segment r) v))
+
+;; Indexed by PC.
+(defvar *relocation-table*)
+(defvar *defining-relocations-p* nil)
+
+
+(defun figure-out-reloc (symbol pc)
+  (let* ((sym (get-asm-symbol symbol))
+	 (extern-p (eq (asm-symbol-type sym) 'extern)))
+    (make-relocation :address pc :extern-p extern-p
+		     :symbol (if extern-p symbol (asm-symbol-type sym)))))
+
+(defun check-reloc-consistency (reloc-a reloc-b)
+  (assert (every (lambda (fn)
+		   (eql (funcall fn reloc-a)
+			(funcall fn reloc-b)))
+		 (list #'relocation-address
+		       ;; XXX relocation-size
+		       #'relocation-symbol
+		       #'relocation-extern-p))))
+
+(defun add-relocation (symbol)
+  (when *defining-relocations-p*
+    ;; figure out what kind of relocation this is
+    (let ((reloc (figure-out-reloc symbol *program-counter*)))
+      (sif (gethash *program-counter* *relocation-table*)
+	   (check-reloc-consistency reloc it)
+	   (setf it reloc)))))
+
+(defun pc-relativise-relocation ()
+  ;; if there's a reloc at this PC, make it pc-relative.
+  ;; XXX if the symbol is not extern, then delete from relocation
+  ;; table (no need to relocate relative references within the same
+  ;; file).
+  (swhen (gethash *program-counter* *relocation-table*)
+    (setf (relocation-pc-relative-p it) t)))
+
+(defun fix-relocation-size (size)
+  (swhen (gethash *program-counter* *relocation-table*)
+    (setf (relocation-size it) size)))
 
 
 ;;;; HELPER FUNCTIONS
 
-(defun extract-string-from-operand (operand)
-  (dolist (x operand)
+(defun extract-string-from-tree (tree)
+  "Return the first string we come to in TREE."
+  (dolist (x tree)
     (cond ((stringp x) (return x))
 	  ((consp x)
-	   (awhen (extract-string-from-operand operand)
+	   (awhen (extract-string-from-tree x)
 	     (return it))))))
 
 (defun resolve-expression (expression)
@@ -322,7 +394,9 @@ resolved."
 		  (lognot it)
 		  expression))
 	  (symbol (aif (get-symbol-value expression)
-		       it
+		       (progn 
+			 (add-relocation expression)
+			 it)
 		       expression))
 	  (t expression)))))
 
@@ -362,7 +436,8 @@ in.")
 	;; last label seen
 	*last-label* nil
 	*current-section* 'text
-	*object-streams* nil)
+	*object-streams* nil
+	*relocation-table* (make-hash-table))
   ;; open file and start processing
   (with-lexer (input-name)
     ;; Note that we create a file for BSS even though it should all be
@@ -379,37 +454,6 @@ in.")
 			     *object-streams*)))
 	(backpatch)
 	(finalize-object-file object-name lengths)))))
-
-
-(defun finalize-object-file (name section-lengths)
-  "Finalize object file (collect sections, write symbol table,
-patch header)."
-  (with-open-file (output-stream name :direction :output
-				 :element-type 'unsigned-byte
-				 :if-exists :new-version
-				 :if-does-not-exist :create)
-    (write-big-endian-data output-stream #x53544F26 32) ; Magic
-    ;; Text, Data, BSS
-    (mapcar (lambda (x)
-	      (write-big-endian-data output-stream (cdr x) 32))
-	    section-lengths)
-    ;; symbol table
-    (write-big-endian-data output-stream 0 32)
-    ;; entry point
-    (write-big-endian-data output-stream 0 32)
-    ;; text reloc size
-    (write-big-endian-data output-stream 0 32)
-    ;; data reloc size
-    (write-big-endian-data output-stream 0 32)
-
-    (copy-stream-contents (cdr (assoc 'text *object-streams*))
-			  output-stream)
-    (copy-stream-contents (cdr (assoc 'data *object-streams*))
-			  output-stream)
-    ;; symbol table
-    ;; relocations
-    ))
-
 
 (defun process-current-file ()
   (handler-case
@@ -433,7 +477,7 @@ patch header)."
 		    (process-line line)
 		    (push line *macro-buffer*)))
 	       (t (process-line line))))) ; otherwise, process it.
-    (end-of-file nil (format t "~&all done now."))))
+    (end-of-file nil)))
 
 (defun operation-type-of-line (line)
   (awhen (cadr (find 'operation line :key #'car))
@@ -462,20 +506,35 @@ patch header)."
 		 (handle-label-normally label)))))))
 
 (defun handle-label-normally (label)
-  (when (and label (null (get-symbol-type label)))
-    (add-to-symbol-table (second label) *program-counter*)))
+  (when label
+    (let ((name (extract-string-from-tree label)))
+      (when (not (local-label-name-p name))
+	(setf *last-label* name))
+      ;; If the type is nil, the symbol isn't present.
+      (cond ((null (get-symbol-type name))
+	     (add-to-symbol-table name *program-counter*))
+	    ;; If the value is nil, it was probably declared as a global
+	    ;; before it was actually defined.
+	    ((null (get-symbol-value name))
+	     (assert (not (eq (get-symbol-type name) 'extern))
+		     (name) "Trying to set a value for an EXTERN symbol!")
+	     (setf (get-symbol-value name) *program-counter*))
+	    ;; Otherwise, it's a redefinition and I won't stand for it.
+	    (t (warn "~A: tried to redefine label ~A"
+		     *source-position* name))))))
 
 (defun assemble-opcode (label operation operands)
   (let ((opcode (caadr operation))
 	(modifier (cadadr operation)))
     (handle-label-normally label)
     (awhen (find-matching-entry opcode operands modifier)
-      (multiple-value-bind (data len)
-	  (generate-code (second it) operands modifier)
-	(when (consp data)
-	  (push (make-backpatch-item data len) *backpatch-list*)
-	  (setf data #x4E714E71))	; Output NOP if all else fails.
-	(output-data data len)))))
+      (let ((*defining-relocations-p* t))
+	(multiple-value-bind (data len)
+	    (generate-code (second it) operands modifier)
+	  (when (consp data)
+	    (push (make-backpatch-item data len) *backpatch-list*)
+	    (setf data #x4E714E71))	; Output NOP if all else fails.
+	  (output-data data len))))))
 
 
 (defun assemble-pseudo-op (label operation operands)

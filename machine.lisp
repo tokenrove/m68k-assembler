@@ -38,13 +38,13 @@
 	     ((4 ,(if (string= x "ADD") #b1101 #b1001))
 	      (3 (register-idx second-operand)) (1 #b0)
 	      (2 (modifier-bits modifier))
-	      (6 (effective-address-mode first-operand))
+	      (6 (effective-address-mode first-operand modifier))
 	      (? (effective-address-extra first-operand modifier))))
 	    (((byte word long) (data-register) (memory-alterable-modes))
 	     ((4 ,(if (string= x "ADD") #b1101 #b1001))
 	      (3 (register-idx first-operand)) (1 #b1)
 	      (2 (modifier-bits modifier))
-	      (6 (effective-address-mode second-operand))
+	      (6 (effective-address-mode second-operand modifier))
 	      (? (effective-address-extra second-operand modifier))))
 	    ,(concatenate 'string x "A")
 	    ,(concatenate 'string x "I")
@@ -55,21 +55,21 @@
 	     ((4 ,(if (string= x "ADD") #b1101 #b1001))
 	      (3 (register-idx second-operand))
 	      (3 (if-eql-word-p modifier #b011 #b111))
-	      (6 (effective-address-mode first-operand))
+	      (6 (effective-address-mode first-operand modifier))
 	      (? (effective-address-extra first-operand modifier)))))
 	   (,(concatenate 'string x "I")
 	    (((byte word long) (immediate) (data-alterable-modes))
 	     ((8 ,(if (string= x "ADD") #b00000110 #b00000100))
 	      (2 (modifier-bits modifier))
-	      (6 (effective-address-mode second-operand))
+	      (6 (effective-address-mode second-operand modifier))
 	      (? (immediate-value first-operand modifier))
 	      (? (effective-address-extra second-operand modifier)))))
 	   (,(concatenate 'string x "Q")
 	    (((byte word long) (immediate (<= 1 value 8)) (alterable-modes))
-	     ((4 #b0101) (3 (immediate-value first-operand))
+	     ((4 #b0101) (3 (addq-immediate-value first-operand))
 	      (1 ,(if (string= x "ADD") 0 1))
 	      (2 (modifier-bits modifier))
-	      (6 (effective-address-mode second-operand))
+	      (6 (effective-address-mode second-operand modifier))
 	      (? (effective-address-extra second-operand modifier)))))
 	   (,(concatenate 'string x "X")
 	    (((byte word long) (data-register) (data-register))
@@ -92,7 +92,7 @@
 			    ((string= x "OR") #b1000)))
 		  (3 (register-idx second-operand)) (1 #b0)
 		  (2 (modifier-bits modifier))
-		  (6 (effective-address-mode first-operand))
+		  (6 (effective-address-mode first-operand modifier))
 		  (? (effective-address-extra first-operand modifier))))))
 	    (((byte word long) (data-register) (memory-alterable-modes))
 	     ((4 ,(cond ((string= x "AND") #b1100)
@@ -100,7 +100,7 @@
 			((string= x "OR") #b1000)))
 	      (3 (register-idx first-operand)) (1 #b1)
 	      (2 (modifier-bits modifier))
-	      (6 (effective-address-mode second-operand))
+	      (6 (effective-address-mode second-operand modifier))
 	      (? (effective-address-extra second-operand modifier))))
 	    ,(concatenate 'string x "I"))
 	   (,(concatenate 'string x "I")
@@ -110,7 +110,7 @@
 			((string= x "EOR") #b1010)
 			((string= x "OR") #b0000)))
 	      (2 (modifier-bits modifier))
-	      (6 (effective-address-mode second-operand))
+	      (6 (effective-address-mode second-operand modifier))
 	      (? (immediate-value first-operand modifier))
 	      (? (effective-address-extra second-operand modifier))))
 	    (((byte) (immediate) (register (string-equal value "CCR")))
@@ -157,7 +157,7 @@
 		       ((string= x "ROX" :end1 3) #b10)
 		       (t #b11)))
 	     (1 ,(if (string= x "L" :start1 (1- (length x))) 1 0))
-	     (2 #b11) (6 (effective-address-mode first-operand))
+	     (2 #b11) (6 (effective-address-mode first-operand modifier))
 	     (? (effective-address-extra first-operand modifier))))))
        '("ASL" "ASR" "LSL" "LSR" "ROL" "ROR" "ROXL" "ROXR"))
 
@@ -178,11 +178,11 @@
 	   (((byte long) (data-register) (data-alterable-modes))
 	    ((4 #b0000) (3 (register-idx first-operand))
 	     (1 #b1) (2 ,(cdr x))
-	     (6 (effective-address-mode second-operand))
+	     (6 (effective-address-mode second-operand modifier))
 	     (? (effective-address-extra second-operand modifier))))
 	   (((byte long) (immediate) (data-alterable-modes))
 	    ((8 #b00001000) (2 ,(cdr x))
-	     (6 (effective-address-mode second-operand))
+	     (6 (effective-address-mode second-operand modifier))
 	     (8 #b00000000) (8 (immediate-value immediate 'byte))
 	     (? (effective-address-extra second-operand modifier))))))
        '(("BCHG" . #b01) ("BCLR" . #b10) ("BSET" . #b11) ))
@@ -192,18 +192,18 @@
      (((byte long) (data-register) (data-addressing-modes))
 	    ((4 #b0000) (3 (register-idx first-operand))
 	     (3 #b100)
-	     (6 (effective-address-mode second-operand))
+	     (6 (effective-address-mode second-operand modifier))
 	     (? (effective-address-extra second-operand modifier))))
      (((byte long) (immediate) (data-addressing-modes))
       ((10 #b0000100000)
-       (6 (effective-address-mode second-operand))
+       (6 (effective-address-mode second-operand modifier))
        (8 #b00000000) (8 (immediate-value immediate 'byte))
        (? (effective-address-extra second-operand modifier)))))
 
     ("CHK"
      (((word) (data-addressing-modes) (data-register))
       ((4 #b0100) (3 (register-idx second-operand)) (3 #b110)
-       (6 (effective-address-mode first-operand))
+       (6 (effective-address-mode first-operand modifier))
        (? (effective-address-extra first-operand modifier)))))
     
     ,@(mapcar
@@ -216,7 +216,7 @@
 		       ((string= x "NEGX") #b000)
 		       ((string= x "CLR") #b010)))
 	     (2 (modifier-bits modifier))
-	     (6 (effective-address-mode first-operand))
+	     (6 (effective-address-mode first-operand modifier))
 	     (? (effective-address-extra first-operand modifier))))))
        '("CLR" "NEG" "NEGX" "NOT"))
 
@@ -224,19 +224,19 @@
      (((byte word long) (all-ea-modes) (data-register))
       ((4 #b1011) (3 (register-idx second-operand)) (1 #b0)
        (2 (modifier-bits modifier))
-       (6 (effective-address-mode first-operand))
+       (6 (effective-address-mode first-operand modifier))
        (? (effective-address-extra first-operand modifier))))
      "CMPA" "CMPI" "CMPM")
     ("CMPA"
      (((word long) (all-ea-modes) (address-register))
       ((4 #b1011) (3 (register-idx second-operand))
        (3 (if-eql-word-p modifier #b011 #b111))
-       (6 (effective-address-mode first-operand))
+       (6 (effective-address-mode first-operand modifier))
        (? (effective-address-extra first-operand modifier)))))
     ("CMPI"
      (((byte word long) (immediate) (data-alterable-modes))
       ((8 #b00001100) (2 (modifier-bits modifier))
-       (6 (effective-address-mode second-operand))
+       (6 (effective-address-mode second-operand modifier))
        (? (immediate-value first-operand modifier))
        (? (effective-address-extra second-operand modifier)))))
     ("CMPM"
@@ -269,7 +269,7 @@
 	     (3 (register-idx second-operand))
 	     (3 ,(if (or (string= x "DIVS") (string= x "MULS"))
 		     #b111 #b011))
-	     (6 (effective-address-mode first-operand))
+	     (6 (effective-address-mode first-operand modifier))
 	     (? (effective-address-extra first-operand modifier))))))
        '("DIVS" "DIVU" "MULS" "MULU"))
 
@@ -293,17 +293,17 @@
 
     ("JMP"
      ((nil (control-addressing-modes))
-      ((10 #b0100111011) (6 (effective-address-mode first-operand))
+      ((10 #b0100111011) (6 (effective-address-mode first-operand modifier))
        (? (effective-address-extra first-operand modifier)))))
     ("JSR"
      ((nil (control-addressing-modes))
-      ((10 #b0100111010) (6 (effective-address-mode first-operand))
+      ((10 #b0100111010) (6 (effective-address-mode first-operand modifier))
        (? (effective-address-extra first-operand modifier)))))
 
     ("LEA"
      (((long) (control-addressing-modes) (address-register))
       ((4 #b0100) (3 (register-idx second-operand)) (3 #b111)
-       (6 (effective-address-mode first-operand))
+       (6 (effective-address-mode first-operand modifier))
        (? (effective-address-extra first-operand modifier)))))
 
     ("LINK"
@@ -314,22 +314,22 @@
     ("MOVE"
      (((byte word long) (all-ea-modes) (data-alterable-modes))
       ((2 #b00) (2 (modifier-bits-for-move modifier))
-       (6 (effective-address-mode second-operand :flipped-p t))
-       (6 (effective-address-mode first-operand))
+       (6 (effective-address-mode second-operand modifier :flipped-p t))
+       (6 (effective-address-mode first-operand modifier))
        (? (effective-address-extra first-operand modifier))
        (? (effective-address-extra second-operand modifier))))
      (((word) (register (string-equal value "CCR"))
        (data-alterable-modes))
-      ((10 #b0100001011) (6 (effective-address-mode second-operand))
+      ((10 #b0100001011) (6 (effective-address-mode second-operand modifier))
        (? (effective-address-extra second-operand modifier))))
      (((word) (data-addressing-modes) (register (string-equal value "CCR")))
-      ((10 #b0100010011) (6 (effective-address-mode first-operand))
+      ((10 #b0100010011) (6 (effective-address-mode first-operand modifier))
        (? (effective-address-extra first-operand modifier))))
      (((word) (data-addressing-modes) (register (string-equal value "SR")))
-      ((10 #b0100011011) (6 (effective-address-mode first-operand))
+      ((10 #b0100011011) (6 (effective-address-mode first-operand modifier))
        (? (effective-address-extra first-operand modifier))))
      (((word) (register (string-equal value "SR")) (data-alterable-modes))
-      ((10 #b0100000011) (6 (effective-address-mode second-operand))
+      ((10 #b0100000011) (6 (effective-address-mode second-operand modifier))
        (? (effective-address-extra second-operand modifier))))
      (((long) (register (string-equal value "USP")) (address-register))
       ((13 #b0100111001101) (3 (register-idx second-operand))))
@@ -340,18 +340,18 @@
      (((word long) (all-ea-modes) (address-register))
       ((2 #b00) (2 (modifier-bits-for-move modifier))
        (3 (register-idx second-operand)) (3 #b001)
-       (6 (effective-address-mode first-operand))
+       (6 (effective-address-mode first-operand modifier))
        (? (effective-address-extra first-operand modifier)))))
     ("MOVEC") ;; XXX I don't understand the syntax for this one.
     ("MOVEM"
      (((word long) (register-list) (movem-pre-modes))
       ((9 #b010010001) (1 (if-eql-word-p modifier 0 1))
-       (6 (effective-address-mode second-operand))
+       (6 (effective-address-mode second-operand modifier))
        (16 (register-mask-list first-operand :flipped-p t))
        (? (effective-address-extra second-operand modifier))))
      (((word long) (movem-post-modes) (register-list))
       ((9 #b010011001) (1 (if-eql-word-p modifier 0 1))
-       (6 (effective-address-mode first-operand))
+       (6 (effective-address-mode first-operand modifier))
        (16 (register-mask-list second-operand :flipped-p nil))
        (? (effective-address-extra first-operand modifier)))))
     ("MOVEP"
@@ -371,7 +371,7 @@
 
     ("NBCD"
      (((byte) (data-alterable-modes))
-      ((10 #b0100100000) (6 (effective-address-mode first-operand))
+      ((10 #b0100100000) (6 (effective-address-mode first-operand modifier))
        (? (effective-address-extra first-operand modifier)))))
 
     ("RESET" (nil ((16 #b0100111001110000))))
@@ -385,7 +385,7 @@
 
     ("PEA"
      (((long) (control-addressing-modes))
-      ((10 #b0100100001) (6 (effective-address-mode first-operand))
+      ((10 #b0100100001) (6 (effective-address-mode first-operand modifier))
        (? (effective-address-extra first-operand modifier)))))
 
     ,@(mapcar
@@ -406,7 +406,7 @@
 
     ("TAS"
      (((byte) (data-alterable-modes))
-      ((10 #b0100101011) (6 (effective-address-mode first-operand))
+      ((10 #b0100101011) (6 (effective-address-mode first-operand modifier))
        (? (effective-address-extra first-operand modifier)))))
 
     ("TRAP"
@@ -416,7 +416,7 @@
     ("TST"
      (((byte word long) (data-alterable-modes))
       ((8 #b01001010) (2 (modifier-bits modifier))
-       (6 (effective-address-mode first-operand))
+       (6 (effective-address-mode first-operand modifier))
        (? (effective-address-extra first-operand modifier)))))
 
     ("UNLK"
@@ -451,10 +451,7 @@
 (defun opcode-p (string)
   (find string *asm-opcode-table* :key #'car :test #'string-equal))
 
-(defun pseudo-op-p (string)
-  (or (find string *asm-pseudo-op-table* :key #'car :test #'string-equal)
-      (eql (get-symbol-type string) 'macro)))
-
+;; PSEUDO-OP-P has been moved to assembler.lisp
 
 ;;; Really dumb, but this was the only thing in the code generation
 ;;; table that needed to be changed to a function call in order to
