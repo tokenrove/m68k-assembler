@@ -105,12 +105,15 @@
 				 bitwise-operator unary-operator)))
   (car (second tree)))
 
+(defun simplify-value (tree)
+  (second tree))
+
 (defun simplify-factor (tree)
   (cond ((= (length tree) 2)
-	 (let ((v (second (second tree))))
+	 (let ((v (simplify-value (second tree))))
 	   (if (eql (car v) 'constant) (second v) v)))
 	((= (length tree) 3) (list (simplify-operator (second tree))
-				   (second (third tree))))
+				   (simplify-value (third tree))))
 	((= (length tree) 4) (simplify-expression (third tree)))
 	(t (error "Strange parse tree."))))
 

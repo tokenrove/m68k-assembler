@@ -12,12 +12,12 @@
 				       (eql (caadar operands) 'symbol)))
 			  (let ((section (intern (cadar (cdar operands))
 						 (find-package "M68K-ASSEMBLER"))))
-			    (assert (assoc section *object-streams*))
-			    (setf *current-section* section))))
-      ("XDEF" #'define-global)
-      ("GLOBAL" #'define-global)
-      ("XREF" #'define-extern)
-      ("EXTERN" #'define-extern)
+			    (setf *current-section* (cdr (assoc section *sections*)))
+			    (assert *current-section*))))
+      ("XDEF" ,#'define-global)
+      ("GLOBAL" ,#'define-global)
+      ("XREF" ,#'define-extern)
+      ("EXTERN" ,#'define-extern)
       ("ORG" ,(lambda (label op operands modifier)
 		      (declare (ignore label op modifier))
 		      (assert (eql (car (first operands)) 'absolute))
@@ -36,7 +36,9 @@
 					 (first operands))
 					:direction :input
 					:element-type 'unsigned-byte)
-		  (copy-stream-contents stream (current-obj-stream))
+		  (copy-stream-contents stream
+					(section-object-stream
+					 *current-section*))
 		  (incf *program-counter* (file-position stream)))))
 
       ("ALIGN" ,(lambda (label op operands modifier)
@@ -110,8 +112,24 @@
 			     `((,length (absolute-value ,data ,modifier)))
 			     length)
 			    *backpatch-list*)
-		      (setf data #x4E714E71))
-		    (output-data data length)))))
+		      (setf data 0))
+		    ;; The behavior here is that if we're asked to DC
+		    ;; some constant larger than the length we output
+		    ;; it in length chunks.  This might be undesired
+		    ;; behavior for some modifiers, although it's
+		    ;; almost certainly desired behavior for bytes.
+		    ;; Maybe some heuristics and warnings should go
+		    ;; here, or at least a flag to enable/disable this
+		    ;; behavior.
+		    (when (minusp data)	; XXX this is totally broken!
+		      (setf data (+ (ash 1 length) data)))
+		    (do ((total (if (<= 0 data 1) 1 (ceiling (log data 2)
+							     length))
+				(1- total)))
+			((<= total 0))
+		      (output-data (ldb (byte length (* (1- total) length))
+					data)
+				   length))))))
       ("DS"
        ,(lambda (label op operands modifier)
 		(declare (ignore op))
@@ -126,8 +144,8 @@
 		  (output-data 0 (* data length)))))
       ("DCB")			      ; constant block -- number,value
 
-      ("EQU" #'define-equate)
-      ("=" #'define-equate)
+      ("EQU" ,#'define-equate)
+      ("=" ,#'define-equate)
       ;; EQUR (register equate)
       ;; IFEQ etc etc
 
@@ -157,7 +175,7 @@
   (unless label
     (error "~A: EQU always needs a label." *source-position*))
   ;; XXX should probably check operands length etc
-  (add-to-symbol-table label (resolve-expression (first operands))
+  (add-to-symbol-table label (absolute-value (first operands))
 		       :type 'absolute))
 
 (defun execute-macro (name operands modifier)
@@ -207,7 +225,8 @@
       (concatenate 'string *last-label* name)
       name))
 
-(defun add-to-symbol-table (sym value &key (type *current-section*)
+(defun add-to-symbol-table (sym value
+			    &key (type (section-name *current-section*))
 			    (global-p nil))
   (let ((name (extract-sym-name sym)))
     (setf (gethash name *symbol-table*)
@@ -272,7 +291,8 @@
   (make-backpatch :template data :length length
 		  :program-counter *program-counter*
 		  :section *current-section*
-		  :file-position (file-position (current-obj-stream))
+		  :file-position (file-position
+				  (section-object-stream *current-section*))
 		  :last-label *last-label*
 		  :source-position *source-position*))
 
@@ -280,23 +300,25 @@
   `(let ((*program-counter* (backpatch-program-counter ,item))
 	 (*current-section* (backpatch-section ,item))
 	 (*last-label* (backpatch-last-label ,item))
-	 (*source-position* (backpatch-source-position ,item)))
+	 (*source-position* (backpatch-source-position ,item))
+	 (*object-stream* (section-object-stream (backpatch-section ,item))))
     ,@body))
 
 (defun backpatch ()
   ;; go through backpatch list, try to make all patches
   (dolist (x *backpatch-list*)
-    (with-backpatch (x)
-      (let ((*defining-relocations-p* t))
-	(multiple-value-bind (data len)
-	    (generate-code (backpatch-template x) nil nil)
-	  (when (consp data)
-	    (error "~A: Failed to backpatch @ ~A: ~S."
-		   *source-position* *program-counter* data))
-	  (assert (= len (backpatch-length x)))
-	  (assert (file-position (current-obj-stream)
-				 (backpatch-file-position x)))
-	  (output-data data len))))))
+    (using-section ((backpatch-section x))
+      (with-backpatch (x)
+	(let ((*defining-relocations-p* t))
+	  (multiple-value-bind (data len)
+	      (generate-code (backpatch-template x) nil nil)
+	    (when (consp data)
+	      (error "~A: Failed to backpatch @ ~A: ~S."
+		     *source-position* *program-counter* data))
+	    (assert (= len (backpatch-length x)))
+	    (assert (file-position (section-object-stream *current-section*)
+				   (backpatch-file-position x)))
+	    (output-data data len)))))))
 
 
 ;;;; RELOCATION
@@ -335,20 +357,24 @@
 		       #'relocation-extern-p))))
 
 (defun add-relocation (symbol)
-  (when *defining-relocations-p*
-    ;; figure out what kind of relocation this is
+  (when (and *defining-relocations-p*
+	     (not (eq (get-symbol-type symbol) 'absolute)))
     (let ((reloc (figure-out-reloc symbol *program-counter*)))
       (sif (gethash *program-counter* *relocation-table*)
 	   (check-reloc-consistency reloc it)
 	   (setf it reloc)))))
 
 (defun pc-relativise-relocation ()
-  ;; if there's a reloc at this PC, make it pc-relative.
-  ;; XXX if the symbol is not extern, then delete from relocation
-  ;; table (no need to relocate relative references within the same
-  ;; file).
+  "If there's a relocation at this PC, mark it PC-relative."
   (swhen (gethash *program-counter* *relocation-table*)
-    (setf (relocation-pc-relative-p it) t)))
+    ;; If the symbol is not extern and segment is same as current
+    ;; section, then delete from relocation table (no need to relocate
+    ;; same-section relative references within the same file).
+    (if (or (relocation-extern-p it)
+	    (not (eq (relocation-segment it)
+		     (section-name *current-section*))))
+	(setf (relocation-pc-relative-p it) t)
+	(remhash *program-counter* *relocation-table*))))
 
 (defun fix-relocation-size (size)
   (swhen (gethash *program-counter* *relocation-table*)
@@ -382,7 +408,10 @@ resolved."
 	      (t (error "Unknown expression atom: ~A" expression)))
 	(case (car expression)
 	  (+ (bin-op '+ #'+))
-	  (- (bin-op '- #'-))
+	  (- (if (= (length expression) 2)
+		 (let ((v (resolve-expression (second expression))))
+		   (if (integerp v) (- v) expression))
+		 (bin-op '- #'-)))
 	  (* (bin-op '* #'*))
 	  (/ (bin-op '/ #'/))
 	  (& (bin-op '& #'logand))
@@ -390,70 +419,113 @@ resolved."
 	  (^ (bin-op '^ #'logxor))
 	  (<< (bin-op '<< #'ash))
 	  (>> (bin-op '>> #'(lambda (n count) (ash n (- count)))))
-	  (~ (aif (resolve-expression (second expression))
-		  (lognot it)
-		  expression))
-	  (symbol (aif (get-symbol-value expression)
-		       (progn 
-			 (add-relocation expression)
-			 it)
-		       expression))
+	  (~ (let ((v (resolve-expression (second expression))))
+	       (if (integerp v)
+		   (lognot v)
+		   expression)))
+	  (symbol (acond ((get-symbol-value expression)
+			  (add-relocation expression)
+			  it)
+			 (t expression)))
+	  ;;; XXX if we got a constant, it's a bug.  That should have
+	  ;;; been picked out at the AST stage.
+	  (constant (resolve-expression (second expression)))
 	  (t expression)))))
 
+
+;;;; SECTIONS
+
+(defstruct section
+  (name)
+  (object-stream)
+  (output-fn #'write-big-endian-data)
+  (relocations (make-hash-table))
+  (program-counter 0))
+
+(defvar *sections* nil)
+
+(defun section-length (section)
+  #+nil
+  (unless (eq (section-name section) 'bss)
+    (assert (= (section-program-counter section)
+	       (file-position (section-object-stream section)))))
+  (section-program-counter section))
+
+
+(defmacro with-sections (sections &body body)
+  (if sections
+      (if (eq (car sections) 'bss)
+	  `(progn
+	    (push (cons ,(car sections)
+		   (make-section :name ,(car sections)
+				 :output-fn #'bss-output-fn
+				 :object-stream nil
+				 :relocations nil))
+	     *sections*)
+	    (with-sections ,(cdr sections) ,@body))
+
+	  (let ((symbol-of-the-day (gensym)))
+	    `(osicat:with-temporary-file (,symbol-of-the-day
+					  :element-type 'unsigned-byte)
+	      (push (cons ,(car sections)
+		     (make-section :name ,(car sections)
+				   :object-stream ,symbol-of-the-day))
+	       *sections*)
+	      (with-sections ,(cdr sections) ,@body))))
+
+      `(progn ,@body)))
+
+
+(defmacro using-section ((section) &body body)
+  (let ((temporary (gensym)))
+    `(let* ((,temporary ,section)
+	    (*program-counter* (section-program-counter ,temporary))
+	    (*relocation-table* (section-relocations ,temporary))
+	    (*object-stream* (section-object-stream ,temporary)))
+      (unwind-protect
+	   (progn ,@body)
+	(setf (section-program-counter ,temporary) *program-counter*)))))
 
 ;;;; "MAIN" STUFF
 
 (defvar *source-position*)
-(defvar *object-streams*)
-(defvar *program-counter*)
 (defvar *last-label* nil "Last label seen by the assembler.  This is
 used for generating the prefix for local labels.")
-(defvar *current-section* 'text "Current section we're assembling
+(defvar *current-section* nil "Current section we're assembling
 in.")
 
-(defmacro with-object-streams (sections &body body)
-  (if sections
-      (let ((symbol-of-the-day (gensym)))
-	`(osicat:with-temporary-file (,symbol-of-the-day
-				      :element-type 'unsigned-byte)
-	  (push (cons ,(car sections) ,symbol-of-the-day) *object-streams*)
-	  (with-object-streams ,(cdr sections) ,@body)))
-      `(progn ,@body)))
+;; Things bound by new section.  (also: relocation-table)
+(defvar *object-stream*)
+(defvar *program-counter*)
 
 
-(defun current-obj-stream ()
-  (cdr (assoc *current-section* *object-streams*)))
 
 (defun assemble (input-name &key (object-name "mr-ed.o"))
   ;; create symbol table
   (setf *symbol-table* (make-hash-table :test 'equal)
-	;; init program counter
-	*program-counter* 0
 	;; create backpatch list
 	*backpatch-list* nil
 	;; init macro variables
 	*defining-macro-p* nil *defining-rept-p* nil
 	;; last label seen
 	*last-label* nil
-	*current-section* 'text
-	*object-streams* nil
-	*relocation-table* (make-hash-table))
+	*sections* nil)
   ;; open file and start processing
   (with-lexer (input-name)
-    ;; Note that we create a file for BSS even though it should all be
-    ;; zeros just for my utterly lazy convenience.  It's wasteful, but
-    ;; I don't feel like putting in all kinds of hideous special cases
-    ;; just right now.
-    (with-object-streams ('text 'data 'bss)
+    (with-sections ('text 'data 'bss)
+      (setf *current-section* (cdr (assoc 'text *sections*)))
       (process-current-file)
       ;; Prior to backpatching, record section lengths, because
       ;; temporary-files aren't really file streams the way CL would
       ;; like them to be, so we can't just FILE-LENGTH them.
       (let ((lengths (mapcar (lambda (x)
-			       (cons (car x) (file-position (cdr x))))
-			     *object-streams*)))
+			       (cons (car x)
+				     (section-length (cdr x))))
+			     *sections*)))
 	(backpatch)
 	(finalize-object-file object-name lengths)))))
+
+
 
 (defun process-current-file ()
   (handler-case
@@ -465,18 +537,19 @@ in.")
 	   (unclutter-line (parse #'next-token))
 	 (assert (eql (pop line) 'line))
 
-	 ;; if we're in a macro or repeat, accumulate this line.
-	 (cond (*defining-macro-p*
-		(if (and (eql (operation-type-of-line line) 'pseudo-op)
-			 (string-equal (opcode-of-line line) "ENDM"))
-		    (process-line line)
-		    (push line *macro-buffer*)))
-	       (*defining-rept-p*
-		(if (and (eql (operation-type-of-line line) 'pseudo-op)
-			 (string-equal (opcode-of-line line) "ENDR"))
-		    (process-line line)
-		    (push line *macro-buffer*)))
-	       (t (process-line line))))) ; otherwise, process it.
+	 (using-section (*current-section*)
+	   ;; if we're in a macro or repeat, accumulate this line.
+	   (cond (*defining-macro-p*
+		  (if (and (eql (operation-type-of-line line) 'pseudo-op)
+			   (string-equal (opcode-of-line line) "ENDM"))
+		      (process-line line)
+		      (push line *macro-buffer*)))
+		 (*defining-rept-p*
+		  (if (and (eql (operation-type-of-line line) 'pseudo-op)
+			   (string-equal (opcode-of-line line) "ENDR"))
+		      (process-line line)
+		      (push line *macro-buffer*)))
+		 (t (process-line line))))))
     (end-of-file nil)))
 
 (defun operation-type-of-line (line)
@@ -540,13 +613,15 @@ in.")
 (defun assemble-pseudo-op (label operation operands)
   (let ((opcode (caadr operation))
 	(modifier (cadadr operation)))
-    (acond ((find opcode *asm-pseudo-op-table*
-		  :key #'car :test #'string-equal)
-	    (when (functionp (second it))
-	      (funcall (second it) label opcode operands modifier)))
-	   ((eql (get-symbol-type opcode) 'macro)
-	    (execute-macro opcode operands modifier))
-	   (t (error "~&~S: bad pseudo-op ~A!" *source-position* opcode)))))
+    (let ((*defining-relocations-p* t))
+      (acond ((find opcode *asm-pseudo-op-table*
+		    :key #'car :test #'string-equal)
+	      (when (functionp (second it))
+		(funcall (second it) label opcode operands modifier)))
+	     ((eql (get-symbol-type opcode) 'macro)
+	      (execute-macro opcode operands modifier))
+	     (t (error "~&~S: bad pseudo-op ~A!"
+		       *source-position* opcode))))))
 
 
 (defun output-data (data length)
@@ -555,8 +630,12 @@ object file and updates the program counter.  Returns the address to
 which the data assembled."
   #+nil (unless (zerop (mod length 8))
     (setf length (ash (ceiling (/ length 8)) 3)))
+  (when (eq (section-name *current-section*) 'text)
+    (unless (zerop (mod length 16))
+      (format t "~&~A: ~A" *source-position* length)))
   (incf *program-counter* (ash length -3))
-  (write-big-endian-data (current-obj-stream) data length))
+  (funcall (section-output-fn *current-section*)
+	   *object-stream* data length))
 
 
 ;;;; EOF assembler.lisp

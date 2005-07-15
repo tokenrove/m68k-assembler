@@ -17,7 +17,6 @@ Literate input.
 
 Things to add in the assembler:
 
-Verify that BSS contains only zeros.
 Checking ranges of types, signed indices, etc.
 	Also, type checking information stored in the symbol table.
 Output listings (with cycle counts, et cetera).
@@ -31,6 +30,8 @@ CL-style macros?  (that would be cool!)
 Debugger info.
 Output in object formats other than A.OUT.
 Optimizations/data flow analysis.
+Optional lispy object format.  (see st-linker README)
+ADDI instead of ADD in certain cases.
 
 
 THINGS TO DO BEFORE RELEASE
@@ -52,6 +53,11 @@ about them at suitable warning levels.
 	are 8-bit indirect displacements being relocated correctly?
 	verify all possible relocation combinations.	
 - Update dependencies in ASDF file so that it compiles without warnings.
+- *last-label* feels like a hack.  See if there's an alternative.
+- add raw binary output.  (also, to linker.)
+- DC needs some serious cleanups.
+- undo some of the intentional braindamage induced to make us closer
+  to devpac.
 
 
 
@@ -60,15 +66,14 @@ KNOWN ISSUES
 - macro parameters are broken.  At least, <foo> style ones are still
   broken.  [assembler]
 - no checking of vconstraints yet. [codegen]
-- DC.B should handle strings properly (right now it will probably only
-  write out the last byte). [assembler]
 - Unfinished pseudo-ops:
 	EQUR
 	DCB
 	END
 	IFxx
 - branch-displacement-bits will behave badly in some unusual situations.
-- data segment relocations are unsupported.
+- requires that the file end with a newline, and there is no warning
+  that the last line is ignored.
 
 
 KNOWN MAJOR INCOMPATIBILITIES WITH DEVPAC
