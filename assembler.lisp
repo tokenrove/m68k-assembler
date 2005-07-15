@@ -10,7 +10,9 @@
 			  (handle-label-normally label)
 			  (assert (and (eql (caar operands) 'absolute)
 				       (eql (caadar operands) 'symbol)))
-			  (let ((section (intern (cadar (cdar operands))
+			  (assert (= (length operands) 1))
+			  (let ((section (intern (string-upcase
+						  (cadar (cdar operands)))
 						 (find-package "M68K-ASSEMBLER"))))
 			    (setf *current-section* (cdr (assoc section *sections*)))
 			    (assert *current-section*))))
@@ -21,16 +23,19 @@
       ("ORG" ,(lambda (label op operands modifier)
 		      (declare (ignore label op modifier))
 		      (assert (eql (car (first operands)) 'absolute))
+		      (assert (= (length operands) 1))
 		      (setf *program-counter* (absolute-value (first operands)))))
 
       ("INCLUDE"
        ,(lambda (label op operands modifier)
 		(declare (ignore op modifier))
+		(assert (= (length operands) 1))
 		(handle-label-normally label)
 		(nested-lexing (extract-string-from-tree (first operands)))))
       ("INCBIN"
        ,(lambda (label op operands modifier)
 		(declare (ignore op modifier))
+		(assert (= (length operands) 1))
 		(handle-label-normally label)
 		(with-open-file (stream (extract-string-from-tree
 					 (first operands))
@@ -43,6 +48,7 @@
 
       ("ALIGN" ,(lambda (label op operands modifier)
 			(declare (ignore op modifier))
+			(assert (= (length operands) 1))
 			(handle-label-normally label)
 			(let ((align (absolute-value (first operands))))
 			  (do ()
@@ -87,6 +93,7 @@
        ,(lambda (label op operands modifier)
 		(declare (ignore label op modifier))
 		(assert (not *defining-rept-p*))
+		(assert (= (length operands) 1))
 		(setf *macro-buffer* (list (absolute-value (first operands)))
 		      *defining-rept-p* t)))
       ("ENDR"
@@ -136,20 +143,22 @@
 		(handle-label-normally label)
 		(unless modifier (setf modifier 'word))
 		(assert (eql (car (first operands)) 'absolute))
+		(assert (= (length operands) 1)) ; XXX probably not.
 		(let ((data (absolute-value (first operands) modifier))
 		      (length (ecase modifier (byte 8) (word 16) (long 32))))
 		  (unless (integerp data)
 		    (error "~A: Need to be able to resolve DS immediately."
 			   *source-position*))
 		  (output-data 0 (* data length)))))
-      ("DCB")			      ; constant block -- number,value
+      ;; ("DCB")	      ; constant block -- number,value
 
       ("EQU" ,#'define-equate)
       ("=" ,#'define-equate)
       ;; EQUR (register equate)
       ;; IFEQ etc etc
 
-      ("END"))))
+      ;; ("END")  ; early end of source.
+      )))
 
 (defun pseudo-op-p (string)
   (or (find string *asm-pseudo-op-table* :key #'car :test #'string-equal)
@@ -174,35 +183,35 @@
   (declare (ignore op modifier))
   (unless label
     (error "~A: EQU always needs a label." *source-position*))
-  ;; XXX should probably check operands length etc
-  (add-to-symbol-table label (absolute-value (first operands))
-		       :type 'absolute))
+  (assert (= (length operands) 1))
+  (let ((*defining-relocations-p* nil))
+    (add-to-symbol-table label (absolute-value (first operands))
+			 :type 'absolute)))
 
 (defun execute-macro (name operands modifier)
   (labels ((sub (match &rest registers)
-	       (declare (ignore registers))
-	       (acase (char match 1)
-		 (#\@ (format nil "_~D" 
-			      (asm-macro-count (get-symbol-value name))))
-		 (#\0 (case modifier
-			(byte ".B")
-			(long ".L")
-			((word t) ".W")))
-		 (t (nth (digit-to-int it 36) operands))))
-	     (seek+destroy (tree)
-	       (cond ((stringp tree)
-		      (cl-ppcre:regex-replace-all "\\\\[0-9A-Za-z@]"
-						  tree #'sub
-						  :simple-calls t))
-		     ((consp tree)
-		      (let ((new-tree nil))
-			(dolist (branch tree)
-			  (push (seek+destroy branch) new-tree))
-			(nreverse new-tree)))
-		     (t tree))))
-      (dolist (x (asm-macro-body (get-symbol-value name)))
-	(process-line (seek+destroy x)))
-      (incf (asm-macro-count (get-symbol-value name)))))
+	     (declare (ignore registers))
+	     (acase (char match 1)
+	       (#\@ (format nil "_~D" 
+			    (asm-macro-count (get-symbol-value name))))
+	       (#\0 (case modifier (byte ".B") (long ".L") (t ".W")))
+	       (t (nth (digit-to-int it 36) operands))))
+
+	   (seek+destroy (tree)
+	     (cond ((stringp tree)
+		    (cl-ppcre:regex-replace-all "\\\\[0-9A-Za-z@]"
+						tree #'sub
+						:simple-calls t))
+		   ((consp tree)
+		    (let ((new-tree nil))
+		      (dolist (branch tree)
+			(push (seek+destroy branch) new-tree))
+		      (nreverse new-tree)))
+		   (t tree))))
+
+    (dolist (x (asm-macro-body (get-symbol-value name)))
+      (process-line (seek+destroy x)))
+    (incf (asm-macro-count (get-symbol-value name)))))
 
 
 ;;;; SYMBOL TABLE
@@ -218,7 +227,10 @@
   (global-p nil))
 
 (defun local-label-name-p (name)
-  (and (plusp (length name)) (eql (char name 0) #\.)))
+  (and (> (length name) 1) (eql (char name 0) #\.)))
+
+(defun sacred-name-of-pc-p (name)
+  (and (= (length name) 1) (eql (char name 0) #\.)))
 
 (defun maybe-local-label (name)
   (if (local-label-name-p name)
@@ -247,31 +259,38 @@
 
 (defun get-asm-symbol (sym)
   (setf sym (extract-sym-name sym))
-  (gethash sym *symbol-table*))
+  (if (sacred-name-of-pc-p sym)
+      (make-asm-symbol :name "."
+		       :value *program-counter*
+		       :type (section-name *current-section*))
+      (gethash sym *symbol-table*)))
 
 (defun extract-sym-name (sym)
-  (maybe-local-label (cond ((atom sym) sym)
+  (let ((name (cond ((atom sym) sym)
 			   ((or (eql (car sym) 'absolute)
 				(eql (car sym) 'label))
 			    (second (second sym)))
 			   (t (second sym)))))
+    (maybe-local-label name)))
 
 (defun define-extern (label op operands modifier)
   (declare (ignore op modifier))
   ;; add whatever to the symbol table, as an extern
   (handle-label-normally label)
-  (let ((name (extract-string-from-tree (first operands))))
-    (add-to-symbol-table name nil :type 'extern :global-p t)))
+  (dolist (x operands)
+    (let ((name (extract-string-from-tree x)))
+      (add-to-symbol-table name 0 :type 'extern :global-p t))))
 
 (defun define-global (label op operands modifier)
   (declare (ignore op modifier))
   ;; add whatever to the symbol table, or just tweak
   ;; its type if necessary.
   (handle-label-normally label)
-  (let ((name (extract-string-from-tree (first operands))))
-    (aif (get-asm-symbol name)
-	 (setf (asm-symbol-global-p it) t) ; XXX hope this works.
-	 (add-to-symbol-table name nil :global-p t))))
+  (dolist (x operands)
+    (let ((name (extract-string-from-tree x)))
+      (aif (get-asm-symbol name)
+	   (setf (asm-symbol-global-p it) t) ; XXX hope this works.
+	   (add-to-symbol-table name nil :global-p t)))))
 
 ;;;; BACKPATCHING
 
@@ -345,7 +364,9 @@
   (let* ((sym (get-asm-symbol symbol))
 	 (extern-p (eq (asm-symbol-type sym) 'extern)))
     (make-relocation :address pc :extern-p extern-p
-		     :symbol (if extern-p symbol (asm-symbol-type sym)))))
+		     :symbol (if extern-p
+				 (asm-symbol-name sym)
+				 (asm-symbol-type sym)))))
 
 (defun check-reloc-consistency (reloc-a reloc-b)
   (assert (every (lambda (fn)
@@ -442,6 +463,7 @@ resolved."
   (relocations (make-hash-table))
   (program-counter 0))
 
+
 (defvar *sections* nil)
 
 (defun section-length (section)
@@ -453,6 +475,10 @@ resolved."
 
 
 (defmacro with-sections (sections &body body)
+  "Creates the sections named in the SECTIONS list, and executes BODY
+with *SECTIONS* bound to an alist containing the sections.  Except in
+the case of BSS, a temporary stream is created for the object file
+output to a given section."
   (if sections
       (if (eq (car sections) 'bss)
 	  `(progn
@@ -475,8 +501,14 @@ resolved."
 
       `(progn ,@body)))
 
+;; Things bound by new section.  (also: relocation-table)
+(defvar *object-stream*)
+(defvar *program-counter*)
 
 (defmacro using-section ((section) &body body)
+  "Binds various special variables (*PROGRAM-COUNTER*,
+*RELOCATION-TABLE*, *OBJECT-STREAM*) to the environment given by
+SECTION."
   (let ((temporary (gensym)))
     `(let* ((,temporary ,section)
 	    (*program-counter* (section-program-counter ,temporary))
@@ -494,13 +526,14 @@ used for generating the prefix for local labels.")
 (defvar *current-section* nil "Current section we're assembling
 in.")
 
-;; Things bound by new section.  (also: relocation-table)
-(defvar *object-stream*)
-(defvar *program-counter*)
 
+(defun assemble (input-name &key (object-name "mr-ed.o")
+		 (object-format :aout))
+  "Assembles a source file named by INPUT-NAME, to an object file
+named by OBJECT-NAME.
 
-
-(defun assemble (input-name &key (object-name "mr-ed.o"))
+OBJECT-FORMAT can currently only be :AOUT for relocatable a.out object
+files."
   ;; create symbol table
   (setf *symbol-table* (make-hash-table :test 'equal)
 	;; create backpatch list
@@ -523,7 +556,8 @@ in.")
 				     (section-length (cdr x))))
 			     *sections*)))
 	(backpatch)
-	(finalize-object-file object-name lengths)))))
+	(ecase object-format
+	  (:aout (finalize-object-file object-name lengths)))))))
 
 
 
@@ -535,30 +569,27 @@ in.")
        ;; we really don't need all that clutter.
        (multiple-value-bind (line *source-position*)
 	   (unclutter-line (parse #'next-token))
-	 (assert (eql (pop line) 'line))
+	 (assert (eq (pop line) 'line) ()
+		 "Some internal parse tree is messed up.")
 
 	 (using-section (*current-section*)
-	   ;; if we're in a macro or repeat, accumulate this line.
-	   (cond (*defining-macro-p*
-		  (if (and (eql (operation-type-of-line line) 'pseudo-op)
-			   (string-equal (opcode-of-line line) "ENDM"))
-		      (process-line line)
-		      (push line *macro-buffer*)))
-		 (*defining-rept-p*
-		  (if (and (eql (operation-type-of-line line) 'pseudo-op)
-			   (string-equal (opcode-of-line line) "ENDR"))
+	   ;; if we're in a macro or repeat, just accumulate this
+	   ;; line.  otherwise, process it.
+	   (cond ((or *defining-macro-p* *defining-rept-p*)
+		  (if (and (eq (operation-type-of-line line) 'pseudo-op)
+			   (string-equal (opcode-of-line line)
+					 (if *defining-macro-p*
+					     "ENDM" "ENDR")))
 		      (process-line line)
 		      (push line *macro-buffer*)))
 		 (t (process-line line))))))
     (end-of-file nil)))
 
 (defun operation-type-of-line (line)
-  (awhen (cadr (find 'operation line :key #'car))
-    (car it)))
+  (awhen (cadr (find 'operation line :key #'car)) (car it)))
 
 (defun opcode-of-line (line)
-  (awhen (cadr (find 'operation line :key #'car))
-    (caadr it)))
+  (awhen (cadr (find 'operation line :key #'car)) (caadr it)))
 
 (defun process-line (line)
   (let ((label (find 'label line :key #'car))
@@ -570,13 +601,7 @@ in.")
 	  ((eql (operation-type-of-line line) 'pseudo-op)
 	   (assemble-pseudo-op label operation operands))
 	  (t
-	   (when label
-	     ;; might be a macro or something... see if it
-	     ;; exists, first.  and complain about
-	     ;; redefinition, except in the case of locals.
-	     (if (get-symbol-type label)
-		 (warn "~&~S: tried to redefine ~A (cowardly not allowing this)." *source-position* label)
-		 (handle-label-normally label)))))))
+	   (handle-label-normally label)))))
 
 (defun handle-label-normally (label)
   (when label
@@ -587,13 +612,15 @@ in.")
       (cond ((null (get-symbol-type name))
 	     (add-to-symbol-table name *program-counter*))
 	    ;; If the value is nil, it was probably declared as a global
-	    ;; before it was actually defined.
+	    ;; before it was actually defined.  Patch value, debug-info.
 	    ((null (get-symbol-value name))
-	     (assert (not (eq (get-symbol-type name) 'extern))
-		     (name) "Trying to set a value for an EXTERN symbol!")
-	     (setf (get-symbol-value name) *program-counter*))
+	     (let ((sym (get-asm-symbol name)))
+	       (assert (not (eq (asm-symbol-type sym) 'extern))
+		       (name) "Trying to set a value for an EXTERN symbol!")
+	       (setf (asm-symbol-value sym) *program-counter*
+		     (asm-symbol-debug-info sym) *source-position*)))
 	    ;; Otherwise, it's a redefinition and I won't stand for it.
-	    (t (warn "~A: tried to redefine label ~A"
+	    (t (warn "~A: tried to redefine label ~A -- ignoring."
 		     *source-position* name))))))
 
 (defun assemble-opcode (label operation operands)

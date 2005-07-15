@@ -5,6 +5,11 @@ assembler should be callable from other CL applications, as well as
 executable as a stand-alone program.
 
 
+The a.out object format supported here and by st-linker is not really
+quite exactly a.out.  It's close, though.
+
+
+
 Things to add in the grammar/parser/lexer:
 
 Support for ' (single ASCII character?) -- only because the
@@ -20,12 +25,12 @@ Things to add in the assembler:
 Checking ranges of types, signed indices, etc.
 	Also, type checking information stored in the symbol table.
 Output listings (with cycle counts, et cetera).
-Add better PC-relative stuff (.+6 or *+42 notation f.ex).
 Support for later chips in the m68k line, and enabling/disabling
 	allowance of their added instructions.
 Change lookup tables so that on load, they get converted to hash
 	tables or whatever's appropriate.
 Nifty local labels a-la GNU as or similar.  (0f, 1b, etc)
+BRA.S (currently you have to say BRA.B).
 CL-style macros?  (that would be cool!)
 Debugger info.
 Output in object formats other than A.OUT.
@@ -39,15 +44,13 @@ THINGS TO DO BEFORE RELEASE
 - remove debugging output.
 - add a decent warning/error display and logging system.
 - compile list of known issues, try to resolve.
-- start converting improvised list structure into real structures or
-  objects.
 - put together a basic automated test suite.
   (once object format has settled down, start a set of regression files,
    with sane output verified by hand.)
 - skim all XXXs.
 - once a better warning system is in place, allow routines like
-MODIFIER-BITS to guess the size of underspecified operations, and warn
-about them at suitable warning levels.
+  MODIFIER-BITS to guess the size of underspecified operations, and warn
+  about them at suitable warning levels.
 - test with sourcer68 output of various files.
 - Things to test about relocation:
 	are 8-bit indirect displacements being relocated correctly?
@@ -58,6 +61,8 @@ about them at suitable warning levels.
 - DC needs some serious cleanups.
 - undo some of the intentional braindamage induced to make us closer
   to devpac.
+- various pseudo-ops need to work on list of operands rather than
+  single operand.
 
 
 
@@ -65,6 +70,7 @@ KNOWN ISSUES
 
 - macro parameters are broken.  At least, <foo> style ones are still
   broken.  [assembler]
+- size output is broken if ORG is used. [assembler]
 - no checking of vconstraints yet. [codegen]
 - Unfinished pseudo-ops:
 	EQUR

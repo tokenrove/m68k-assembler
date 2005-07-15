@@ -34,6 +34,8 @@
     ,@(mapcan
        (lambda (x)
 	 `((,x
+	    ,(concatenate 'string x "I") ; I and Q are faster.
+	    ,(concatenate 'string x "Q")
 	    (((byte word long) (all-ea-modes) (data-register))
 	     ((4 ,(if (string= x "ADD") #b1101 #b1001))
 	      (3 (register-idx second-operand)) (1 #b0)
@@ -47,8 +49,6 @@
 	      (6 (effective-address-mode second-operand modifier))
 	      (? (effective-address-extra second-operand modifier))))
 	    ,(concatenate 'string x "A")
-	    ,(concatenate 'string x "I")
-	    ,(concatenate 'string x "Q")
 	    ,(concatenate 'string x "X"))
 	   (,(concatenate 'string x "A")
 	    (((word long) (all-ea-modes) (address-register))
@@ -86,6 +86,7 @@
     ,@(mapcan
        (lambda (x)
 	 `((,x
+	    ,(concatenate 'string x "I") ; I is usually faster.
 	    ,@(unless (string= x "EOR")
 	      `((((byte word long) (data-addressing-modes) (data-register))
 		 ((4 ,(cond ((string= x "AND") #b1100)
@@ -101,8 +102,7 @@
 	      (3 (register-idx first-operand)) (1 #b1)
 	      (2 (modifier-bits modifier))
 	      (6 (effective-address-mode second-operand modifier))
-	      (? (effective-address-extra second-operand modifier))))
-	    ,(concatenate 'string x "I"))
+	      (? (effective-address-extra second-operand modifier)))))
 	   (,(concatenate 'string x "I")
 	    (((byte word long) (immediate) (data-alterable-modes))
 	     ((4 #b0000)
@@ -221,12 +221,13 @@
        '("CLR" "NEG" "NEGX" "NOT"))
 
     ("CMP"
+     "CMPI"				; I is faster
      (((byte word long) (all-ea-modes) (data-register))
       ((4 #b1011) (3 (register-idx second-operand)) (1 #b0)
        (2 (modifier-bits modifier))
        (6 (effective-address-mode first-operand modifier))
        (? (effective-address-extra first-operand modifier))))
-     "CMPA" "CMPI" "CMPM")
+     "CMPA" "CMPM")
     ("CMPA"
      (((word long) (all-ea-modes) (address-register))
       ((4 #b1011) (3 (register-idx second-operand))

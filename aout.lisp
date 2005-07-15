@@ -1,5 +1,5 @@
 ;;;
-;;; a.out object file support for m68k-assembler.
+;;; Mostly-a.out object file support for m68k-assembler.
 ;;;
 ;;; Julian Squires / 2005
 
@@ -7,14 +7,13 @@
 
 
 (defun finalize-object-file (name section-lengths)
-  "Finalize object file (collect sections, write symbol table,
+  "Finalize a.out object file (collect sections, write symbol table,
 patch header)."
   (with-open-file (output-stream name :direction :output
 				 :element-type 'unsigned-byte
 				 :if-exists :new-version
 				 :if-does-not-exist :create)
     ;; revise symbol table/relocs to use numeric indices
-    (format t "~&~A" *sections*)
     (let* ((symbols (serialize-symbol-table)))
       (write-big-endian-data output-stream #x53544F26 32) ; Magic
       ;; section lengths.
@@ -24,8 +23,8 @@ patch header)."
 				       32))
 	      '(text data bss))
       (mapcar (lambda (x)
-		(format t "~&~A: ~A - ~A" x (cdr (assoc x section-lengths))
-			(section-length (cdr (assoc x *sections*)))))
+		(format t "~&~A: ~A bytes." x
+			(cdr (assoc x section-lengths))))
 	      '(text data bss))
       ;; symbol table
       (write-big-endian-data output-stream (length symbols) 32)
@@ -71,8 +70,8 @@ patch header)."
 	      output-stream
 	      (logior (ash (relocation-index-bits v symbols) 8)
 		      (ash (if (relocation-pc-relative-p v) 1 0) 7)
-		      (ash (ceiling (log (/ (relocation-size v) 8) 2)) 5)
-		      (ash (if (relocation-extern-p v) 1 0) 4))
+		      (ash (if (relocation-extern-p v) 1 0) 6)
+		      (ldb (byte 6 0) (relocation-size v)))
 	      32))
 	   relocs))
 
@@ -106,11 +105,12 @@ patch header)."
 
 (defun relocation-index-bits (v symbols)
   (if (relocation-extern-p v)
-      (position (relocation-symbol v) symbols :test #'string-equal)
+      (position (relocation-symbol v) symbols :test #'string-equal
+		:key #'asm-symbol-name)
       (position (relocation-segment v) '(text data bss))))
 
 (defun serialize-symbol-table ()
-  (let ((table (make-array (list 0))))
+  (let ((table (make-array (list 0) :adjustable t :fill-pointer 0)))
     (maphash (lambda (k v)
 	       (declare (ignore k))
 	       (when (asm-symbol-global-p v)
