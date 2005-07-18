@@ -9,6 +9,17 @@ The a.out object format supported here and by st-linker is not really
 quite exactly a.out.  It's close, though.
 
 
+To build this from scratch, you'll need to do something like:
+(in the m68k-asm directory)
+
+CL-USER> (asdf:oos 'asdf:load-op :lalr-parser-generator)
+CL-USER> (load "m68k-grammar")
+CL-USER> (with-open-file (stream "parser.lisp" :direction :output)
+            (lalr:make-parser m68k-asm::*m68k-asm-grammar*
+                              :package (find-package "M68K-ASSEMBLER")
+                              :stream stream))
+
+
 
 Things to add in the grammar/parser/lexer:
 
@@ -71,13 +82,13 @@ KNOWN ISSUES
 - macro parameters are broken.  At least, <foo> style ones are still
   broken.  [assembler]
 - size output is broken if ORG is used. [assembler]
-- no checking of vconstraints yet. [codegen]
-- Unfinished pseudo-ops:
+- Unfinished pseudo-ops: (all are quite easy)
 	EQUR
 	DCB
 	END
 	IFxx
 - branch-displacement-bits will behave badly in some unusual situations.
+  It's ugly and needs to be cleaned up.
 - requires that the file end with a newline, and there is no warning
   that the last line is ignored.
 

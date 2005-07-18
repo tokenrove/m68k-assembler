@@ -100,7 +100,6 @@
 			    :test #'string-equal)))
     (cond ((stringp entry)		; redirect.
 	   (awhen (find-matching-entry entry operands modifier)
-	     (format t "~&redirecting: ~A ~A => ~A" opcode modifier entry)
 	     (return it)))
 	  ((consp entry)
 	   (when (and (satisfies-modifier-constraints-p modifier
@@ -219,13 +218,15 @@ the length of that data."
      (let ((index (indirect-index-register operand)))
        (if (not (pc-register-p (indirect-base-register operand)))
 	   ;; rrrr l000 dddd dddd
-	   (values (logior (ash (register-idx index :both-sets t) 12)
-			   (if (aand (register-modifier index)
-				     (eql it 'long))
-			       (ash #b1 11) 0)
-			   (logand (indirect-displacement operand 'byte)
-				   #xff))
-		   16)
+	   (let ((displacement (indirect-displacement operand 'byte)))
+	     (values (if (integerp displacement)
+			 (logior (ash (register-idx index :both-sets t) 12)
+			     (if (aand (register-modifier index)
+				       (eql it 'long))
+				 (ash #b1 11) 0)
+			     (logand displacement #xff))
+			 `(effective-address-extra ,operand ,modifier))
+		     16))
 	   (error "Not sure how to encode this!")))) ;XXX
     (absolute
       (ecase (refine-type operand modifier)
@@ -279,23 +280,21 @@ per IMMEDIATE-VALUE."
 :DB-P is T, calculate displacement as per the DBcc opcodes (always
 16-bit).  Otherwise, calculate displacement as per Bcc opcodes, where
 displacement is either 8 bits or 16 padded to 24."
-  (let ((value (absolute-value operand (or modifier
-					   (if db-p 'word 'byte))))
-	(length (cond (db-p 16)
-		      ((eq modifier 'byte) 8)
-		      (t 24))))
+  ;; Note PC+2 -- this is due to the way the m68k fetches
+  ;; instructions. XXX
+  (let* ((*program-counter* (if (oddp *program-counter*)
+				(1+ *program-counter*)
+				*program-counter*))
+	 (value (absolute-value operand (or modifier 'word)))
+	 (length (cond (db-p 16)
+		       ((eq modifier 'byte) 8)
+		       (t 24))))
     ;; if there's a reloc at this pc, change to pc-relative
     (pc-relativise-relocation)
-    (fix-relocation-size length)
+    (fix-relocation-size (if (= length 24) 16 length))
 
-    ;; Note PC+2 -- this is due to the way the m68k fetches
-    ;; instructions. XXX
-    (values (or (and (integerp value)
-		     (logand
-		      (- value (if (oddp *program-counter*)
-				   (1+ *program-counter*)
-				   *program-counter*))
-		      #xffff))
+    (values (if (integerp value)
+		(logand (- value *program-counter*) #xffff)
 		value)
 	    length)))
 

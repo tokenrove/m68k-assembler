@@ -1,165 +1,6 @@
 
 (in-package :m68k-assembler)
 
-;;;; PSEUDO-OPS
-
-(eval-when (:compile-toplevel :load-toplevel)
-  (defparameter *asm-pseudo-op-table*
-    `(("SECTION" ,(lambda (label op operands modifier)
-			  (declare (ignore op modifier))
-			  (handle-label-normally label)
-			  (assert (and (eql (caar operands) 'absolute)
-				       (eql (caadar operands) 'symbol)))
-			  (assert (= (length operands) 1))
-			  (let ((section (intern (string-upcase
-						  (cadar (cdar operands)))
-						 (find-package "M68K-ASSEMBLER"))))
-			    (setf *current-section* (cdr (assoc section *sections*)))
-			    (assert *current-section*))))
-      ("XDEF" ,#'define-global)
-      ("GLOBAL" ,#'define-global)
-      ("XREF" ,#'define-extern)
-      ("EXTERN" ,#'define-extern)
-      ("ORG" ,(lambda (label op operands modifier)
-		      (declare (ignore label op modifier))
-		      (assert (eql (car (first operands)) 'absolute))
-		      (assert (= (length operands) 1))
-		      (setf *program-counter* (absolute-value (first operands)))))
-
-      ("INCLUDE"
-       ,(lambda (label op operands modifier)
-		(declare (ignore op modifier))
-		(assert (= (length operands) 1))
-		(handle-label-normally label)
-		(nested-lexing (extract-string-from-tree (first operands)))))
-      ("INCBIN"
-       ,(lambda (label op operands modifier)
-		(declare (ignore op modifier))
-		(assert (= (length operands) 1))
-		(handle-label-normally label)
-		(with-open-file (stream (extract-string-from-tree
-					 (first operands))
-					:direction :input
-					:element-type 'unsigned-byte)
-		  (copy-stream-contents stream
-					(section-object-stream
-					 *current-section*))
-		  (incf *program-counter* (file-position stream)))))
-
-      ("ALIGN" ,(lambda (label op operands modifier)
-			(declare (ignore op modifier))
-			(assert (= (length operands) 1))
-			(handle-label-normally label)
-			(let ((align (absolute-value (first operands))))
-			  (do ()
-			      ((zerop (mod *program-counter* align)))
-			    (output-data 0 8)))))
-      ("EVEN" ,(lambda (label op operands modifier)
-		       (declare (ignore op modifier operands))
-		       (handle-label-normally label)
-		       (unless (evenp *program-counter*)
-			 (output-data 0 8))))
-      ;; offset,align -- offset+(PC+align-1)&~(align-1)
-      ;; XXX untested.
-      ("CNOP" ,(lambda (label op operands modifier)
-		       (declare (ignore op modifier))
-		       (handle-label-normally label)
-		       (let ((offset (absolute-value (first operands)))
-			     (align (absolute-value (second operands))))
-			 (do ()
-			     ((zerop (mod (- *program-counter* offset) align)))
-			   (output-data 0 8)))))
-
-      ("MACRO"
-       ,(lambda (label op operands modifier)
-		(declare (ignore op operands modifier))
-		;; if *defining-macro-p* is already set, cry foul.
-		(assert (not *defining-macro-p*))
-		(assert label)
-		;; otherwise, clear out *macro-buffer*.
-		(setf *macro-buffer* (list (second label))
-		      *defining-macro-p* t)))
-      ("ENDM"
-       ,(lambda (label op operands modifier)
-		(declare (ignore label op operands modifier))
-		(assert *defining-macro-p*)
-		(setf *macro-buffer* (nreverse *macro-buffer*)
-		      *defining-macro-p* nil)
-		(add-to-symbol-table (first *macro-buffer*)
-				     (make-asm-macro :body (cdr *macro-buffer*))
-				     :type 'macro)))
-
-      ("REPT"
-       ,(lambda (label op operands modifier)
-		(declare (ignore label op modifier))
-		(assert (not *defining-rept-p*))
-		(assert (= (length operands) 1))
-		(setf *macro-buffer* (list (absolute-value (first operands)))
-		      *defining-rept-p* t)))
-      ("ENDR"
-       ,(lambda (label op operands modifier)
-		(declare (ignore label op operands modifier))
-		(assert *defining-rept-p*)
-		(setf *macro-buffer* (nreverse *macro-buffer*)
-		      *defining-rept-p* nil)
-		(dotimes (i (pop *macro-buffer*))
-		  (dolist (x *macro-buffer*)
-		    (process-line x)))))
-
-      ("DC" 
-       ,(lambda (label op operands modifier)
-		(declare (ignore op))
-		(handle-label-normally label)
-		(unless modifier (setf modifier 'word))
-		(dolist (x operands)
-		  (let ((data (absolute-value x modifier))
-			(length (ecase modifier (byte 8) (word 16) (long 32))))
-		    (when (consp data)
-		      (push (make-backpatch-item
-			     `((,length (absolute-value ,data ,modifier)))
-			     length)
-			    *backpatch-list*)
-		      (setf data 0))
-		    ;; The behavior here is that if we're asked to DC
-		    ;; some constant larger than the length we output
-		    ;; it in length chunks.  This might be undesired
-		    ;; behavior for some modifiers, although it's
-		    ;; almost certainly desired behavior for bytes.
-		    ;; Maybe some heuristics and warnings should go
-		    ;; here, or at least a flag to enable/disable this
-		    ;; behavior.
-		    (when (minusp data)	; XXX this is totally broken!
-		      (setf data (+ (ash 1 length) data)))
-		    (do ((total (if (<= 0 data 1) 1 (ceiling (log data 2)
-							     length))
-				(1- total)))
-			((<= total 0))
-		      (output-data (ldb (byte length (* (1- total) length))
-					data)
-				   length))))))
-      ("DS"
-       ,(lambda (label op operands modifier)
-		(declare (ignore op))
-		(handle-label-normally label)
-		(unless modifier (setf modifier 'word))
-		(assert (eql (car (first operands)) 'absolute))
-		(assert (= (length operands) 1)) ; XXX probably not.
-		(let ((data (absolute-value (first operands) modifier))
-		      (length (ecase modifier (byte 8) (word 16) (long 32))))
-		  (unless (integerp data)
-		    (error "~A: Need to be able to resolve DS immediately."
-			   *source-position*))
-		  (output-data 0 (* data length)))))
-      ;; ("DCB")	      ; constant block -- number,value
-
-      ("EQU" ,#'define-equate)
-      ("=" ,#'define-equate)
-      ;; EQUR (register equate)
-      ;; IFEQ etc etc
-
-      ;; ("END")  ; early end of source.
-      )))
-
 (defun pseudo-op-p (string)
   (or (find string *asm-pseudo-op-table* :key #'car :test #'string-equal)
       (eql (get-symbol-type string) 'macro)))
@@ -294,7 +135,8 @@
 
 ;;;; BACKPATCHING
 
-(defvar *backpatch-list* nil)
+(eval-when (:compile-toplevel :load-toplevel)
+  (defvar *backpatch-list* nil))
 
 ;; backpatch structure
 (defstruct backpatch
@@ -315,13 +157,14 @@
 		  :last-label *last-label*
 		  :source-position *source-position*))
 
-(defmacro with-backpatch ((item) &body body)
-  `(let ((*program-counter* (backpatch-program-counter ,item))
-	 (*current-section* (backpatch-section ,item))
-	 (*last-label* (backpatch-last-label ,item))
-	 (*source-position* (backpatch-source-position ,item))
-	 (*object-stream* (section-object-stream (backpatch-section ,item))))
-    ,@body))
+(eval-when (:compile-toplevel :load-toplevel)
+  (defmacro with-backpatch ((item) &body body)
+    `(let ((*program-counter* (backpatch-program-counter ,item))
+	   (*current-section* (backpatch-section ,item))
+	   (*last-label* (backpatch-last-label ,item))
+	   (*source-position* (backpatch-source-position ,item))
+	   (*object-stream* (section-object-stream (backpatch-section ,item))))
+      ,@body)))
 
 (defun backpatch ()
   ;; go through backpatch list, try to make all patches
@@ -355,9 +198,8 @@
 (defun relocation-segment (r) (relocation-symbol r))
 (defun (setf relocation-segment) (v r) (setf (relocation-segment r) v))
 
-;; Indexed by PC.
-(defvar *relocation-table*)
-(defvar *defining-relocations-p* nil)
+(eval-when (:compile-toplevel :load-toplevel)
+  (defvar *defining-relocations-p* nil))
 
 
 (defun figure-out-reloc (symbol pc)
@@ -454,77 +296,14 @@ resolved."
 	  (t expression)))))
 
 
-;;;; SECTIONS
-
-(defstruct section
-  (name)
-  (object-stream)
-  (output-fn #'write-big-endian-data)
-  (relocations (make-hash-table))
-  (program-counter 0))
-
-
-(defvar *sections* nil)
-
-(defun section-length (section)
-  #+nil
-  (unless (eq (section-name section) 'bss)
-    (assert (= (section-program-counter section)
-	       (file-position (section-object-stream section)))))
-  (section-program-counter section))
-
-
-(defmacro with-sections (sections &body body)
-  "Creates the sections named in the SECTIONS list, and executes BODY
-with *SECTIONS* bound to an alist containing the sections.  Except in
-the case of BSS, a temporary stream is created for the object file
-output to a given section."
-  (if sections
-      (if (eq (car sections) 'bss)
-	  `(progn
-	    (push (cons ,(car sections)
-		   (make-section :name ,(car sections)
-				 :output-fn #'bss-output-fn
-				 :object-stream nil
-				 :relocations nil))
-	     *sections*)
-	    (with-sections ,(cdr sections) ,@body))
-
-	  (let ((symbol-of-the-day (gensym)))
-	    `(osicat:with-temporary-file (,symbol-of-the-day
-					  :element-type 'unsigned-byte)
-	      (push (cons ,(car sections)
-		     (make-section :name ,(car sections)
-				   :object-stream ,symbol-of-the-day))
-	       *sections*)
-	      (with-sections ,(cdr sections) ,@body))))
-
-      `(progn ,@body)))
-
-;; Things bound by new section.  (also: relocation-table)
-(defvar *object-stream*)
-(defvar *program-counter*)
-
-(defmacro using-section ((section) &body body)
-  "Binds various special variables (*PROGRAM-COUNTER*,
-*RELOCATION-TABLE*, *OBJECT-STREAM*) to the environment given by
-SECTION."
-  (let ((temporary (gensym)))
-    `(let* ((,temporary ,section)
-	    (*program-counter* (section-program-counter ,temporary))
-	    (*relocation-table* (section-relocations ,temporary))
-	    (*object-stream* (section-object-stream ,temporary)))
-      (unwind-protect
-	   (progn ,@body)
-	(setf (section-program-counter ,temporary) *program-counter*)))))
-
 ;;;; "MAIN" STUFF
 
-(defvar *source-position*)
-(defvar *last-label* nil "Last label seen by the assembler.  This is
+(eval-when (:compile-toplevel :load-toplevel)
+  (defvar *source-position*)
+  (defvar *last-label* nil "Last label seen by the assembler.  This is
 used for generating the prefix for local labels.")
-(defvar *current-section* nil "Current section we're assembling
-in.")
+  (defvar *current-section* nil "Current section we're assembling
+in."))
 
 
 (defun assemble (input-name &key (object-name "mr-ed.o")

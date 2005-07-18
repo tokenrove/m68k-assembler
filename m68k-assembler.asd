@@ -9,11 +9,14 @@
   ((:file "package")
    (:file "utils" :depends-on ("package"))
    (:file "machine" :depends-on ("package"))
-   (:file "lexer" :depends-on ("package"))
+   (:file "lexer" :depends-on ("package" "machine"))
    (:file "parser" :depends-on ("package"))
    (:file "ast" :depends-on ("package"))
-   (:file "codegen" :depends-on ("package"))
-   (:file "assembler" :depends-on ("package"))
-   (:file "aout" :depends-on ("package"))))
+   (:file "sections" :depends-on ("package" "utils"))
+   (:file "codegen" :depends-on ("package" "sections" "utils"))
+   (:file "pseudo-ops" :depends-on ("package" "assembler"))
+   (:file "assembler" :depends-on ("package" "sections" "utils"
+				   "codegen" "ast" "parser" "lexer"))
+   (:file "aout" :depends-on ("package" "assembler" "utils"))))
 
 ;;; XXX add stuff to build parser here
