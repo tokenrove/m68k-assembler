@@ -4,6 +4,35 @@
 
 (in-package :m68k-assembler)
 
+(let ((all-ea-modes '(immediate pc-index pc-displacement absolute-long absolute-short
+		      postincrement-indirect predecrement-indirect displacement-indirect
+		      indexed-indirect vanilla-indirect address-register data-register)))
+  (defparameter *constraints-modes-table*
+    `((all-ea-modes ,all-ea-modes)
+      (alterable-modes
+       ,(set-difference all-ea-modes
+			'(immediate pc-index pc-displacement)))
+      (data-alterable-modes
+       ,(set-difference all-ea-modes
+			'(immediate pc-index pc-displacement address-register)))
+      (memory-alterable-modes
+       ,(set-difference all-ea-modes
+			'(immediate pc-index pc-displacement address-register data-register)))
+      (data-addressing-modes
+       ,(set-difference all-ea-modes '(address-register)))
+      (control-addressing-modes
+       ,(set-difference all-ea-modes
+			'(address-register data-register immediate predecrement-indirect
+			  postincrement-indirect)))
+      (movem-pre-modes (vanilla-indirect predecrement-indirect
+			displacement-indirect indexed-indirect absolute-short
+			absolute-long))
+      (movem-post-modes (vanilla-indirect postincrement-indirect
+			 displacement-indirect indexed-indirect absolute-short
+			 absolute-long pc-displacement pc-index))
+      (absolute (absolute-short absolute-long)))
+    "Table of mode names used in *ASM-OPCODE-TABLE* for constraint matching."))
+
 (defparameter *asm-opcode-table*
   ;; first field is the opcode name, sans modifiers.  remaining fields
   ;; are either pairs of operand constraints and code generation
@@ -434,13 +463,6 @@
 
 ;;;; HELPER FUNCTIONS
 
-(defun munge-modifier (string)
-  (let ((modifier nil))
-    (awhen (position #\. string)
-      (setf modifier (subseq string (1+ it)))
-      (setf string (subseq string 0 it)))
-    (values string modifier)))
-
 (defun register-substitutions (string)
   ;; XXX: allow dynamic register substitutions for EQUR directive
   (when (string-equal string "sp") (setf string "a7"))
@@ -450,6 +472,9 @@
   (find string *asm-register-table* :key #'car :test #'string-equal))
 
 (defun opcode-p (string)
+  (get-asm-opcode string))
+
+(defun get-asm-opcode (string)
   (find string *asm-opcode-table* :key #'car :test #'string-equal))
 
 ;; PSEUDO-OP-P has been moved to assembler.lisp

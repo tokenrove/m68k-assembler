@@ -1,10 +1,32 @@
 (in-package :m68k-assembler)
 
+;;;; STRINGS
+
+(defun munge-modifier (string)
+  "Chops off the period-delimited extension of STRING, and returns the
+new string without the extension as well as the extension, or NIL if
+such an extension could not be found."
+  (let ((modifier nil))
+    (awhen (position #\. string :from-end t)
+      (setf modifier (subseq string (1+ it)))
+      (setf string (subseq string 0 it)))
+    (values string modifier)))
+
 ;;;; LISTS
 
 (defun carat (x)
   "If X is a cons, return the car of it.  Otherwise, return X."
   (if (consp x) (car x) x))
+
+(defun tree-find-if (predicate tree)
+  (redirect-find-if (lambda (x) (tree-find-if predicate x))
+		    #'consp predicate tree))
+
+(defun redirect-find-if (redirect-fn redirect-predicate predicate tree)
+  (dolist (x tree)
+    (if (funcall redirect-predicate x)
+	(awhen (funcall redirect-fn x) (return it))
+	(when (funcall predicate x) (return x)))))
 
 
 ;;;; BINARY DATA, STREAMS

@@ -17,42 +17,34 @@ patch header)."
     (let* ((symbols (serialize-symbol-table)))
       (write-big-endian-data output-stream #x53544F26 32) ; Magic
       ;; section lengths.
-      (mapcar (lambda (x)
-		(write-big-endian-data output-stream
-				       (cdr (assoc x section-lengths))
-				       32))
-	      '(text data bss))
-      (mapcar (lambda (x)
-		(format t "~&~A: ~A bytes." x
-			(cdr (assoc x section-lengths))))
-	      '(text data bss))
+      (dolist (x '(text data bss))
+	(write-big-endian-data output-stream
+			       (cdr (assoc x section-lengths))
+			       32))
+      (dolist (x '(text data bss))
+	(format t "~&~A: ~A bytes." x (cdr (assoc x section-lengths))))
       ;; symbol table
       (write-big-endian-data output-stream (length symbols) 32)
       ;; entry point
       (write-big-endian-data output-stream 0 32)
       ;; reloc sizes
-      (mapcar (lambda (x)
-		(write-big-endian-data output-stream
-				       (hash-table-count
-					(section-relocations
-					 (cdr (assoc x *sections*))))
-				       32))
-	      '(text data))
+      (dolist (x '(text data))
+	(write-big-endian-data output-stream
+			       (hash-table-count
+				(section-relocations
+				 (cdr (assoc x *sections*))))
+			       32))
 
       ;; actual contents of sections.
-      (mapcar (lambda (x)
-		(copy-stream-contents
-		 (section-object-stream (cdr (assoc x *sections*)))
-		 output-stream))
-	      '(text data))
+      (dolist (x '(text data))
+	(copy-stream-contents (section-object-stream (cdr (assoc x *sections*)))
+			      output-stream))
 
       ;; output relocations
-      (mapcar (lambda (x)
-		(output-reloc-table output-stream
-				    (section-relocations
-				     (cdr (assoc x *sections*)))
-				    symbols))
-	      '(text data))
+      (dolist (x '(text data))
+	(output-reloc-table output-stream
+			    (section-relocations (cdr (assoc x *sections*)))
+			    symbols))
 
       (output-symbol-table output-stream symbols)
       (output-string-table output-stream symbols))))
@@ -92,9 +84,13 @@ patch header)."
      32)
     (write-big-endian-data output-stream (asm-symbol-value sym) 32)))
 
+;;; XXX needs to be fixed.
 (defun output-string-table (output-stream symbols)
   (dotimes (i (length symbols))
-    (write-string (asm-symbol-name (aref symbols i)) output-stream)
+    (write-sequence #+sb-unicode (sb-ext:string-to-octets (asm-symbol-name (aref symbols i)))
+		    #-sb-unicode (coerce (asm-symbol-name (aref symbols i))
+					 '(vector unsigned-byte))
+		    output-stream)
     (write-byte 0 output-stream)))
 
 ;;; XXX we could do something much more sophisticated, such as having
@@ -109,12 +105,4 @@ patch header)."
 		:key #'asm-symbol-name)
       (position (relocation-segment v) '(text data bss))))
 
-(defun serialize-symbol-table ()
-  (let ((table (make-array (list 0) :adjustable t :fill-pointer 0)))
-    (maphash (lambda (k v)
-	       (declare (ignore k))
-	       (when (asm-symbol-global-p v)
-		 (vector-push-extend v table)))
-	     *symbol-table*)
-    table))
 

@@ -6,33 +6,6 @@
 
 ;;;; OPERAND CONSTRAINTS
 
-(defparameter *all-ea-modes*
-  '(immediate pc-index pc-displacement absolute-long absolute-short
-    postincrement-indirect predecrement-indirect displacement-indirect
-    indexed-indirect vanilla-indirect address-register data-register))
-
-(defparameter *constraints-modes-table*
-  `((all-ea-modes ,*all-ea-modes*)
-    (alterable-modes ,(set-difference *all-ea-modes*
-     '(immediate pc-index pc-displacement)))
-    (data-alterable-modes ,(set-difference *all-ea-modes*
-     '(immediate pc-index pc-displacement address-register)))
-    (memory-alterable-modes ,(set-difference *all-ea-modes*
-     '(immediate pc-index pc-displacement address-register data-register)))
-    (data-addressing-modes ,(set-difference *all-ea-modes*
-					    '(address-register)))
-    (control-addressing-modes ,(set-difference *all-ea-modes*
-     '(address-register data-register immediate predecrement-indirect
-       postincrement-indirect)))
-    (movem-pre-modes (vanilla-indirect predecrement-indirect
-		      displacement-indirect indexed-indirect absolute-short
-		      absolute-long))
-    (movem-post-modes (vanilla-indirect postincrement-indirect
-		       displacement-indirect indexed-indirect absolute-short
-		       absolute-long pc-displacement pc-index))
-    (absolute (absolute-short absolute-long))))
-
-
 ;; transforms...
 ;;    displacement-indirect w/o expression => vanilla-indirect
 ;;    register dX => data-register
@@ -41,11 +14,12 @@
 
 (defun refine-type (operand modifier)
   (cond 
-    ;; XXX: should try to evaluate expression if it exists.
-    ((and (eq (car operand) 'displacement-indirect)
-	  (zerop (indirect-displacement operand 'word))
-	  (address-register-p (indirect-base-register operand)))
-     'vanilla-indirect)
+    ((eq (car operand) 'displacement-indirect)
+     (let ((displacement (indirect-displacement operand 'word)))
+       (if (and (integerp displacement) (zerop displacement)
+		(address-register-p (indirect-base-register operand)))
+	   'vanilla-indirect
+	   (car operand))))
     ((eq (car operand) 'register)
      (case (char (caadr operand) 0)
        ((#\d #\D) 'data-register)
@@ -69,25 +43,25 @@
 	 (eql refined-op (car constraint)))))
 
 (defun satisfies-operand-constraints-p (operands constraints modifier)
-  (block top
-    (when (equal (length operands) (length constraints))
-      (do ((op-> operands (cdr op->))
-	   (co-> constraints (cdr co->)))
-	  ((and (null op->) (null co->)) t)
-	(unless (operand-type-matches-constraint-type-p (car op->)
-							(car co->)
-							modifier)
-	  (return-from top nil))
-	(dolist (v-constraint (cdar co->))
-	  ;; bind value to the first string or whatever
-	  (let ((subbed (subst (cond ((eq (caar op->) 'immediate)
-				      (resolve-expression (cadar op->)))
-				     ((eq (caar op->) 'register)
-				      (caadar op->))
-				     (t (error "Dunno how to apply vconstraints to a ~A." (caar op->))))
-			       'value v-constraint)))
-	    (unless (apply (car subbed) (cdr subbed))
-	      (return-from top nil))))))))
+  (every
+   (lambda (op constraint)
+     (and (operand-type-matches-constraint-type-p op constraint modifier)
+	  (operand-satisfies-value-constraints-p op (cdr constraint))))
+   operands constraints))
+
+(defun operand-satisfies-value-constraints-p (operand constraints)
+  (every (lambda (constraint)
+	   ;; bind value to the first string or whatever
+	   (let* ((value (cond ((eq (first operand) 'immediate)
+				(resolve-expression (second operand)))
+			       ((eq (first operand) 'register)
+				(car (second operand)))
+			       (t (error "Dunno how to apply vconstraints to ~A." operand))))
+		  (subbed (subst value 'value constraint)))
+	     (if (atom value)
+		 (apply (car subbed) (cdr subbed))
+		 t)))			; default to T.
+	 constraints))
 
 (defun satisfies-modifier-constraints-p (modifier mod-list)
   (cond ((null mod-list) (null modifier))
@@ -96,19 +70,13 @@
 
 
 (defun find-matching-entry (opcode operands modifier)
-  (dolist (entry (cdr (find opcode *asm-opcode-table* :key #'car
-			    :test #'string-equal)))
-    (cond ((stringp entry)		; redirect.
-	   (awhen (find-matching-entry entry operands modifier)
-	     (return it)))
-	  ((consp entry)
-	   (when (and (satisfies-modifier-constraints-p modifier
-							(caar entry))
-		      (satisfies-operand-constraints-p operands
-						       (cdar entry)
-						       modifier))
-	     (return entry)))
-	  (t (error "Bad entry in opcode table: ~A: ~A" opcode entry)))))
+  (redirect-find-if
+   (lambda (redirect) (find-matching-entry redirect operands modifier))
+   #'stringp
+   (lambda (entry)
+     (and (satisfies-modifier-constraints-p modifier (caar entry))
+	  (satisfies-operand-constraints-p operands (cdar entry) modifier)))
+   (cdr (get-asm-opcode opcode))))
 
 
 ;;;; CODE GENERATION HELPERS
@@ -266,7 +234,7 @@ OPERAND, based on MODIFIER, if specified."
   "Special hack for ADDQ/SUBQ.  Returns OPERAND mod 8 and the rest as
 per IMMEDIATE-VALUE."
   (multiple-value-bind (v l) (immediate-value operand modifier)
-    (values (mod v 8) l)))
+    (values (if (integerp v) (mod v 8) v) l)))
 
 (defun modifier-bits (modifier)
   (values (ecase modifier (byte #b00) (word #b01) (long #b10)) 2))
@@ -303,12 +271,10 @@ displacement is either 8 bits or 16 padded to 24."
 
 
 (defun make-codegen-sublis (operands modifier)
-  (let ((sub (list (cons 'modifier modifier))))
-    ;; Adjust as necessary for the number of operands possible.
-    (do ((a-> operands (cdr a->))
-	 (b-> '(first-operand second-operand third-operand) (cdr b->)))
-	((or (null a->) (null b->)) sub)
-      (push (cons (car b->) (car a->)) sub))))
+  ;; Adjust as necessary for the number of operands possible.
+  (mapcar #'cons
+	  '(modifier first-operand second-operand)
+	  (cons modifier operands)))
 
 (defun fill-codegen-template (list)
   (do* ((item-> list (cdr item->))

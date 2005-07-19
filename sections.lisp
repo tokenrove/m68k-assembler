@@ -10,8 +10,6 @@
   (program-counter 0))
 
 
-(defvar *sections* nil)
-
 (defun section-length (section)
   #+nil
   (unless (eq (section-name section) 'bss)
@@ -47,11 +45,6 @@ output to a given section."
 	      (with-sections ,(cdr sections) ,@body))))
 
       `(progn ,@body)))
-
-;; Things bound by new section.
-(defvar *object-stream* nil "Stream to object data.")
-(defvar *program-counter* nil "Program counter of current section.")
-(defvar *relocation-table* nil "Relocations, indexed by PC.")
 
 
 (defmacro using-section ((section) &body body)

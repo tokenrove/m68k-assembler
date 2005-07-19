@@ -108,6 +108,12 @@
 (defun simplify-value (tree)
   (second tree))
 
+
+;; XXX change all this stuff to something data driven:
+;;(factor (nil (simplify-value))
+;;	(nil (simplify-operator) (simplify-value))
+;;	(nil nil (simplify-expression) nil))
+
 (defun simplify-factor (tree)
   (cond ((= (length tree) 2)
 	 (let ((v (simplify-value (second tree))))
