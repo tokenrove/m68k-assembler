@@ -86,13 +86,15 @@ files."
       ;; If the type is nil, the symbol isn't present.
       (cond ((null (get-symbol-type name))
 	     (add-to-symbol-table name *program-counter*))
-	    ;; If the value is nil, it was probably declared as a global
-	    ;; before it was actually defined.  Patch value, debug-info.
+	    ;; If the value is nil, it was probably declared as a
+	    ;; global before it was actually defined.  Patch value,
+	    ;; type, debug-info.
 	    ((null (get-symbol-value name))
 	     (let ((sym (get-asm-symbol name)))
 	       (assert (not (eq (asm-symbol-type sym) 'extern))
 		       (name) "Trying to set a value for an EXTERN symbol!")
 	       (setf (asm-symbol-value sym) *program-counter*
+		     (asm-symbol-type sym) (section-name *current-section*)
 		     (asm-symbol-debug-info sym) *source-position*)))
 	    ;; Otherwise, it's a redefinition and I won't stand for it.
 	    (t (warn "~A: tried to redefine label ~A -- ignoring."

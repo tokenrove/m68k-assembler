@@ -81,7 +81,7 @@ KNOWN ISSUES
 
 - macro parameters are broken.  At least, <foo> style ones are still
   broken.  [assembler]
-- size output is broken if ORG is used. [assembler]
+- size output is broken if ORG is used.
 - Unfinished pseudo-ops: (all are quite easy)
 	EQUR
 	DCB
