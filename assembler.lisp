@@ -102,14 +102,16 @@ files."
   (let ((opcode (caadr operation))
 	(modifier (cadadr operation)))
     (handle-label-normally label)
-    (awhen (find-matching-entry opcode operands modifier)
-      (let ((*defining-relocations-p* t))
-	(multiple-value-bind (data len)
-	    (generate-code (second it) operands modifier)
-	  (when (consp data)
-	    (push (make-backpatch-item data len) *backpatch-list*)
-	    (setf data #x4E714E71))	; Output NOP if all else fails.
-	  (output-data data len))))))
+    (aif (find-matching-entry opcode operands modifier)
+	 (let ((*defining-relocations-p* t))
+	   (multiple-value-bind (data len)
+	       (generate-code (second it) operands modifier)
+	     (when (consp data)
+	       (push (make-backpatch-item data len) *backpatch-list*)
+	       (setf data #x4E714E71))	; Output NOP if all else fails.
+	     (output-data data len)))
+	 (error "~S: no matching opcode for ~A!" *source-position*
+		opcode))))
 
 
 (defun assemble-pseudo-op (label operation operands)

@@ -76,21 +76,24 @@ patch header)."
     (write-big-endian-data output-stream i 32)
     (write-big-endian-data
      output-stream
-     (logior (ash (position (asm-symbol-type sym)
-			    '(text data bss absolute extern))
+     (logior (ash (section->bits (asm-symbol-type sym))
 		  25)
 	     (ash (if (asm-symbol-global-p sym) 1 0) 24)
 	     (aout-munge-debug-info (asm-symbol-debug-info sym)))
      32)
     (write-big-endian-data output-stream (asm-symbol-value sym) 32)))
 
+(defun section->bits (section)
+  (position section '(text data bss absolute extern)))
+
 ;;; XXX needs to be fixed.
 (defun output-string-table (output-stream symbols)
   (dotimes (i (length symbols))
-    (write-sequence #+sb-unicode (sb-ext:string-to-octets (asm-symbol-name (aref symbols i)))
-		    #-sb-unicode (coerce (asm-symbol-name (aref symbols i))
-					 '(vector unsigned-byte))
-		    output-stream)
+    (let ((sym (asm-symbol-name (aref symbols i))))
+      (write-sequence #+sb-unicode (sb-ext:string-to-octets sym)
+		      #-sb-unicode (coerce (map 'list #'char-code sym)
+					   '(vector unsigned-byte))
+		      output-stream))
     (write-byte 0 output-stream)))
 
 ;;; XXX we could do something much more sophisticated, such as having
