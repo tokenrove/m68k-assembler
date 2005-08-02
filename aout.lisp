@@ -73,7 +73,9 @@ patch header)."
        (sym))
       ((>= i (length symbols)))
     (setf sym (aref symbols i))
-    (assert (asm-symbol-value sym))
+    (format t "~&~A ~A" (asm-symbol-name sym) (asm-symbol-type sym))
+    (assert (and (asm-symbol-value sym)
+		 (asm-symbol-type sym)))
     (write-big-endian-data output-stream i 32)
     (write-big-endian-data
      output-stream

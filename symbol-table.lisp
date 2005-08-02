@@ -81,9 +81,7 @@
 	   ;; We set section-name to nil because the user might want
 	   ;; to XDEF something in a different section from the one in
 	   ;; which the symbol lives.
-	   (add-to-symbol-table name nil
-				:section-name nil
-				:global-p t)))))
+	   (add-to-symbol-table name nil :global-p t)))))
 
 (defun serialize-symbol-table ()
   (let ((table (make-array (list 0) :adjustable t :fill-pointer 0)))

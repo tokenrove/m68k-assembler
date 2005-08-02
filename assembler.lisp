@@ -168,7 +168,9 @@ which the data assembled."
 	       (#\@ (format nil "_~D" 
 			    (asm-macro-count (get-symbol-value name))))
 	       (#\0 (case modifier (byte ".B") (long ".L") (t ".W")))
-	       (t (nth (digit-to-int it 36) operands))))
+	       ;; XXX ugly hack.
+	       (t (extract-string-from-tree (nth (1- (digit-to-int it 36))
+						 operands)))))
 
 	   (seek+destroy (tree)
 	     (typecase tree
