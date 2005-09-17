@@ -11,7 +11,7 @@
 patch header)."
   (with-open-file (output-stream name :direction :output
 				 :element-type 'unsigned-byte
-				 :if-exists :new-version
+				 :if-exists :supersede
 				 :if-does-not-exist :create)
     ;; revise symbol table/relocs to use numeric indices
     (let* ((symbols (serialize-symbol-table)))
