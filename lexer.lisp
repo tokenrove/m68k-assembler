@@ -102,7 +102,8 @@ characters START and END (which default to quotes)."
 	   (lexer-next-column))
       (t (vector-push-extend it string)))))
 
-(defconstant +int-conversion-table+ "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ")
+(defconstant +int-conversion-table+ (load-time-value
+				     "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"))
 (defun digit-to-int (char &optional (radix 10))
   (position char +int-conversion-table+ :test #'char-equal :end radix))
 

@@ -15,6 +15,7 @@ files."
 	*backpatch-list* nil
 	;; init macro variables
 	*defining-macro-p* nil *defining-rept-p* nil
+	*defining-conditional-compilation-p* nil
 	;; last label seen
 	*last-label* nil
 	*sections* nil)
@@ -50,11 +51,15 @@ files."
 	 (using-section (*current-section*)
 	   ;; if we're in a macro or repeat, just accumulate this
 	   ;; line.  otherwise, process it.
-	   (cond ((or *defining-macro-p* *defining-rept-p*)
+	   (cond ((or *defining-macro-p* 
+		      *defining-rept-p*
+		      *defining-conditional-compilation-p*)
 		  (if (and (eq (operation-type-of-line line) 'pseudo-op)
 			   (string-equal (opcode-of-line line)
-					 (if *defining-macro-p*
-					     "ENDM" "ENDR")))
+					 (cond (*defining-macro-p* "ENDM")
+					       (*defining-rept-p* "ENDR")
+					       (*defining-conditional-compilation-p* "ENDC")
+					       (t (error "Bad block!")))))
 		      (process-line line)
 		      (push line *macro-buffer*)))
 		 (t (process-line line))))))
@@ -110,6 +115,7 @@ files."
 	       (generate-code (second it) operands modifier)
 	     (when (consp data)
 	       (push (make-backpatch-item data len) *backpatch-list*)
+	       ;; XXX m68kism.
 	       (setf data #x4E714E71))	; Output NOP if all else fails.
 	     (output-data data len)))
 	 (error "~S: no matching opcode for ~A!" *source-position*

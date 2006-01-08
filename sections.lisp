@@ -37,7 +37,7 @@ output to a given section."
 
 	  (let ((symbol-of-the-day (gensym)))
 	    `(osicat:with-temporary-file (,symbol-of-the-day
-					  :element-type 'unsigned-byte)
+					  :element-type '(unsigned-byte 8))
 	      (push (cons ,(car sections)
 		     (make-section :name ,(car sections)
 				   :object-stream ,symbol-of-the-day))

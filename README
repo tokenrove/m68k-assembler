@@ -4,6 +4,10 @@ assembler, but to be relatively easily retargetable.  Also, this
 assembler should be callable from other CL applications, as well as
 executable as a stand-alone program.
 
+The code's not so clean right now, maybe, but I've been using it for
+various Atari ST projects for a little while now to great personal
+satisfaction.
+
 
 The a.out object format supported here and by st-linker is not really
 quite exactly a.out.  It's close, though.
@@ -18,6 +22,8 @@ CL-USER> (with-open-file (stream "parser.lisp" :direction :output)
             (lalr:make-parser m68k-asm::*m68k-asm-grammar*
                               :package (find-package "M68K-ASSEMBLER")
                               :stream stream))
+
+I'm going to make that a bit cleaner at some point.
 
 
 
@@ -43,6 +49,10 @@ Change lookup tables so that on load, they get converted to hash
 Nifty local labels a-la GNU as or similar.  (0f, 1b, etc)
 BRA.S (currently you have to say BRA.B).
 CL-style macros?  (that would be cool!)
+	The natural thing to do is join this with my other experiment
+	(assembly lisp) and use a sexp intermediary form still
+	accessible to the user which would be more amenable to
+	macrology.
 Debugger info.
 Output in object formats other than A.OUT.
 Optimizations/data flow analysis.
@@ -70,8 +80,6 @@ THINGS TO DO BEFORE RELEASE
 	verify all possible relocation combinations.	
 - Update dependencies in ASDF file so that it compiles without warnings.
 - *last-label* feels like a hack.  See if there's an alternative.
-- add raw binary output.  (actually, unnecessary given the binary
-	target in the linker.)
 - DC needs some serious cleanups.
 - undo some of the intentional braindamage induced to make us closer
   to devpac.
@@ -79,7 +87,14 @@ THINGS TO DO BEFORE RELEASE
   single operand.
 - stifle horrible potential bug with MOVEQ optimizations and negative
   numbers/sign extension.
+- add basic sexp mode.
 
+
+THINGS TO PUT IN TEST SUITE
+
+- conditional compilations;
+- ensure directives like ALIGN and EVEN don't emit unnecessary padding;
+- random instruction streams tested against disassembly.
 
 
 KNOWN ISSUES
@@ -92,7 +107,7 @@ KNOWN ISSUES
 	EQUR
 	DCB
 	END
-	IFxx
+	IFxx (IFEQ and IFNE are already done)
 - branch-displacement-bits will behave badly in some unusual situations.
   It's ugly and needs to be cleaned up.
 - requires that the file end with a newline, and there is no warning

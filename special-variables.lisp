@@ -4,6 +4,7 @@
 
 (defvar *defining-macro-p* nil)
 (defvar *defining-rept-p* nil)
+(defvar *defining-conditional-compilation-p* nil)
 (defvar *macro-buffer*)
 
 (defvar *source-position*)

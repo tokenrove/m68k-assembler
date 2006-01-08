@@ -141,7 +141,32 @@
 		 ("EQU" ,#'define-equate)
 		 ("=" ,#'define-equate)
 		 ;; EQUR (register equate)
-		 ;; IFEQ etc etc
+
+		 ;; Conditional compilation.
+		 ;; XXX What other conditions are there?
+		 ("IFEQ"
+		  ,(lambda (label op operands modifier)
+		    (declare (ignore label op modifier))
+		    (assert (not *defining-conditional-compilation-p*))
+		    (assert (= (length operands) 1))
+		    (setf *macro-buffer* (list (zerop (absolute-value (first operands))))
+			  *defining-conditional-compilation-p* t)))
+		 ("IFNE"
+		  ,(lambda (label op operands modifier)
+		    (declare (ignore label op modifier))
+		    (assert (not *defining-conditional-compilation-p*))
+		    (assert (= (length operands) 1))
+		    (setf *macro-buffer* (list (/= 0 (absolute-value (first operands))))
+			  *defining-conditional-compilation-p* t)))
+		 ("ENDC"
+		  ,(lambda (label op operands modifier)
+		    (declare (ignore label op operands modifier))
+		    (assert *defining-conditional-compilation-p*)
+		    (setf *macro-buffer* (nreverse *macro-buffer*)
+			  *defining-conditional-compilation-p* nil)
+		    (when (pop *macro-buffer*)
+		      (dolist (x *macro-buffer*)
+			(process-line x)))))
 
 		 ;; ("END")  ; early end of source.
 		 ))
