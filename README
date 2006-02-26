@@ -60,6 +60,7 @@ Optional lispy object format.  (see st-linker README)
 Stuff to make guesses about pairs of MOVEM instructions at head of
 	function and just before RTS/RTE, and warn the user if they
 	mismatch.
+Cleaner abstract syntax.
 
 
 THINGS TO DO BEFORE RELEASE
