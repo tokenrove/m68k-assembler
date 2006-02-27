@@ -17,7 +17,7 @@
 		   (when (eql (car x) 'operand)
 		     (push (cadr x) list))
 		   (when (eql (car x) 'operands)
-		     (setf list (append (inner-fn x) list)))))
+		     (setf list (nconc (inner-fn x) list)))))
 	       list)))
     (reverse (inner-fn parse-tree))))
 

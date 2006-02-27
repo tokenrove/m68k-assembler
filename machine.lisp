@@ -221,10 +221,10 @@
     ;; not.
     ("BTST"
      (((byte long) (data-register) (data-addressing-modes))
-	    ((4 #b0000) (3 (register-idx first-operand))
-	     (3 #b100)
-	     (6 (effective-address-mode second-operand modifier))
-	     (? (effective-address-extra second-operand modifier))))
+      ((4 #b0000) (3 (register-idx first-operand))
+       (3 #b100)
+       (6 (effective-address-mode second-operand modifier))
+       (? (effective-address-extra second-operand modifier))))
      (((byte long) (immediate) (data-addressing-modes))
       ((10 #b0000100000)
        (6 (effective-address-mode second-operand modifier))
@@ -238,18 +238,16 @@
        (? (effective-address-extra first-operand modifier)))))
     
     ,@(mapcar
-       (lambda (x)
+       (lambda (x y)
 	 `(,x
 	   (((byte word long) (data-alterable-modes))
 	    ((5 #b01000)
-	     (3 ,(cond ((string= x "NOT") #b110)
-		       ((string= x "NEG") #b100)
-		       ((string= x "NEGX") #b000)
-		       ((string= x "CLR") #b010)))
+	     (3 ,y)
 	     (2 (modifier-bits modifier))
 	     (6 (effective-address-mode first-operand modifier))
 	     (? (effective-address-extra first-operand modifier))))))
-       '("CLR" "NEG" "NEGX" "NOT"))
+       '("CLR" "NEG" "NEGX" "NOT")
+       '(#b010 #b100 #b000 #b110))
 
     ("CMP"
      "CMPI"				; I is faster
@@ -374,7 +372,7 @@
        (3 (register-idx second-operand)) (3 #b001)
        (6 (effective-address-mode first-operand modifier))
        (? (effective-address-extra first-operand modifier)))))
-    ("MOVEC") ;; XXX I don't understand the syntax for this one.
+;;    ("MOVEC") ;; XXX I don't understand the syntax for this one.
     ("MOVEM"
      (((word long) (register-list) (movem-pre-modes))
       ((9 #b010010001) (1 (if-eql-word-p modifier 0 1))

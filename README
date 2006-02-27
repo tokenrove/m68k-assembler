@@ -95,7 +95,8 @@ THINGS TO PUT IN TEST SUITE
 
 - conditional compilations;
 - ensure directives like ALIGN and EVEN don't emit unnecessary padding;
-- random instruction streams tested against disassembly.
+- random instruction streams tested against disassembly;
+- test that * (as comment) and * (as multiply) are being handled correctly.
 
 
 KNOWN ISSUES

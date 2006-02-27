@@ -5,12 +5,16 @@
 
 (defsystem m68k-assembler
   :depends-on (:anaphora :cl-ppcre :osicat :rt)
+  :author "Julian Squires <julian@cipht.net>"
+  :version "alpha zero"
+
   :components
   ((:file "package")
    (:file "special-variables" :depends-on ("package"))
    (:file "utils" :depends-on ("package"))
    (:file "machine" :depends-on ("package" "utils"))
-   (:file "lexer" :depends-on ("package" "machine" "utils"))
+   (:file "deflexer")
+   (:file "lexer" :depends-on ("package" "machine" "utils" "deflexer"))
    (:file "parser" :depends-on ("package"))
    (:file "ast" :depends-on ("package" "utils" "lexer"))
    (:file "sections" :depends-on ("package" "utils" "special-variables"))
