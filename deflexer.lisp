@@ -53,11 +53,10 @@
 		      ,@(unless bindings
 				`((declare (ignore ,reg-starts ,reg-ends))))
 		      (when ,match-start
-			(prog1
-			    (progn ,@(if bindings
-					 `((let (,@bindings) ,@body))
-					 body))
-			  (funcall ,next-pos-fn ,match-end))))))))))))
+			(let ((it (progn ,@(if bindings
+					       `((let (,@bindings) ,@body))
+					       body))))
+			  (when it (funcall ,next-pos-fn ,match-end) it))))))))))))
 
 (defmacro deflexer (name &body body)
   (with-unique-names (regex-table regex sexpr-regex anchored-regex function)

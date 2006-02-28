@@ -25,9 +25,8 @@
   (nested-lexing filename))
 
 (defun close-lexer ()
-  (do ((s #1=(pop *lexer-states*) #1#))
-      ((null s))
-    (close (lexer-state-stream s))))
+  (loop for s = (pop *lexer-states*)
+	while s	do (close (lexer-state-stream s))))
 
 (defun lexer-next-line ()
   (setf (lexer-state-column (first *lexer-states*)) 0)
@@ -54,21 +53,23 @@
 ;;;; MAIN LEXER FUNCTION
 
 (defun next-token ()
-  (handler-bind ((end-of-file (lambda (condition)
-				(pop *lexer-states*)
-				(if *lexer-states*
-				    (next-token)
-				    (error condition)))))
-    (unless *lexer-states*
-      (error 'end-of-file :stream nil))
-    (multiple-value-bind (string column)
-	(ensure-lexer-data (first *lexer-states*))
-      (when (and (zerop column) (not *lexer-seen-only-whitespace-this-line-p*))
-	(return-from next-token (maybe-return-$)))
-      (atypecase (devpac-lexer string #'update-lexer-column :start column)
-	(atom (next-token))
-	(t (setf *lexer-seen-only-whitespace-this-line-p* nil)
-	   it)))))
+  (unless *lexer-states*
+    (error 'end-of-file :stream nil))
+  (handler-case
+      (multiple-value-bind (string column)
+	  (ensure-lexer-data (first *lexer-states*))
+	(when (and (zerop column) (not *lexer-seen-only-whitespace-this-line-p*))
+	  (return-from next-token (maybe-return-$)))
+	(atypecase (devpac-lexer string #'update-lexer-column :start column)
+	  (atom (next-token))
+	  (t (setf *lexer-seen-only-whitespace-this-line-p* nil)
+	     it)))
+    (end-of-file (condition)
+      (pop *lexer-states*)
+      (cond (*lexer-states* (next-token))
+	    (*lexer-seen-only-whitespace-this-line-p*
+	     (error condition))
+	    (t (list '$ nil nil))))))
 
 (defun ensure-lexer-data (state)
   (symbol-macrolet ((string (lexer-state-current-string state)))
@@ -91,18 +92,17 @@
 	return line))
 
 (cl-ppcre-lex:deflexer devpac-lexer
-  ("^[ \\t]*\\*.*$" () 'whitespace)
-  ("[ \\t]+" () 'whitespace)
-  ("([\\r\\n\\f]+|$)" () 'whitespace)
-  ("[;]+.*$" () 'whitespace)
-  ("([\\-():,#+/*|&^~])"
+  ("^[ \\t]*\\*.*$" () (when (zerop (lexer-state-column (first *lexer-states*)))
+			 'whitespace))
+  ("[ \\t\\r\\n\\f]+|$" () 'whitespace)
+  (";.*$" () 'whitespace)
+  ("([-():,#+/*|&^~])"
    (single) (assert single)
    (let ((it (find (char single 0)
 		   '((#\( open) (#\) close) (#\: colon) (#\, comma)
 		     (#\# hash) (#\+ +) (#\- -) (#\/ /) (#\* *) (#\| or)
 		     (#\& &) (#\^ ^) (#\~ ~))
 		   :key #'car)))
-     (assert it)
      (make-token (second it) (first it))))
   ("([0-9]+)" (digits) (assert digits)
    (make-token 'constant (parse-integer digits)))
@@ -110,7 +110,7 @@
    (make-token 'constant (parse-integer digits :radix 16)))
   ("%([01]+)" (digits) (assert digits)
    (make-token 'constant (parse-integer digits :radix 2)))
-  ("([A-Za-z0-9_@.]+)(\\.[bBwWlL])"
+  ("([A-Za-z0-9_\\\\=@.]+)(\\.[bBwWlL])"
    (string modifier) (assert (and string modifier))
    (setf modifier (when modifier (string-to-modifier modifier)))
    (acond ((register-p (register-substitutions string))
@@ -119,19 +119,18 @@
 	  ((opcode-p string) (make-token 'opcode (list string modifier)))
 	  ((pseudo-op-p string) (make-token 'pseudo-op (list string modifier)))
 	  (t (make-token 'symbol string))))
-  ("([A-Za-z0-9_@.]+)"
+  ("([A-Za-z0-9_\\\\=@.]+)"
    (string) (assert string)
    (acond ((register-p (register-substitutions string))
 	   (make-token 'register (list (register-substitutions string) nil)))
 	  ((opcode-p string) (make-token 'opcode (list string nil)))
 	  ((pseudo-op-p string) (make-token 'pseudo-op (list string nil)))
 	  (t (make-token 'symbol string))))
-  ("=" () (make-token 'pseudo-op (list "=" nil)))
-  ("\"([^\"]*)\"" (string) (make-token 'string string))
+  ("\"([^\"]*)\"" (string) (make-token 'constant string))
   ("<<" () (make-token '<< nil))
   (">>" () (make-token '>> nil))
   ("<([^<>]*)>" (string) (make-token 'symbol string))
-  ("(\\\\[1-9A-Za-z@])" (string) (make-token 'symbol string)))
+  ("." () (error "Unknown character.")))
 
 ;;;; LEXER HELPERS
 

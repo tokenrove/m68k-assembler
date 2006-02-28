@@ -21,8 +21,6 @@ patch header)."
 	(write-big-endian-data output-stream
 			       (cdr (assoc x section-lengths))
 			       32))
-      (dolist (x '(text data bss))
-	(format t "~&~A: ~A bytes." x (cdr (assoc x section-lengths))))
       ;; symbol table
       (write-big-endian-data output-stream (length symbols) 32)
       ;; entry point
@@ -73,7 +71,6 @@ patch header)."
        (sym))
       ((>= i (length symbols)))
     (setf sym (aref symbols i))
-    (format t "~&~A ~A" (asm-symbol-name sym) (asm-symbol-type sym))
     (assert (and (asm-symbol-value sym)
 		 (asm-symbol-type sym)))
     (write-big-endian-data output-stream i 32)
@@ -107,7 +104,8 @@ patch header)."
 
 (defun relocation-index-bits (v symbols)
   (if (relocation-extern-p v)
-      (position (relocation-symbol v) symbols :test #'string-equal
+      (position (relocation-symbol v) symbols
+		:test #'string-equal
 		:key #'asm-symbol-name)
       (position (relocation-segment v) '(text data bss))))
 

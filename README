@@ -33,8 +33,6 @@ Support for ' (single ASCII character?) -- only because the
 	book I have says it's part of Motorola's standard.  Should it
 	behave like double-quotes or what?
 Support for floats (once FPU instructions are supported).
-Line continuations with "\".
-Literate input.
 
 
 Things to add in the assembler:
@@ -70,7 +68,9 @@ THINGS TO DO BEFORE RELEASE
 - compile list of known issues, try to resolve.
 - put together a basic automated test suite.
   (once object format has settled down, start a set of regression files,
-   with sane output verified by hand.)
+   with sane output verified by hand; also, feed smaller files that
+   should deliberately provoke certain conditions in, watch for those
+   conditions.)
 - skim all XXXs.
 - once a better warning system is in place, allow routines like
   MODIFIER-BITS to guess the size of underspecified operations, and warn
@@ -96,7 +96,10 @@ THINGS TO PUT IN TEST SUITE
 - conditional compilations;
 - ensure directives like ALIGN and EVEN don't emit unnecessary padding;
 - random instruction streams tested against disassembly;
-- test that * (as comment) and * (as multiply) are being handled correctly.
+- test that * (as comment) and * (as multiply) are being handled correctly;
+- test (known broken) MOVE->MOVEQ sign extension bug;
+- extensive macrology;
+- files that end without newlines, that have funny characters in them, etc.
 
 
 KNOWN ISSUES
@@ -112,8 +115,6 @@ KNOWN ISSUES
 	IFxx (IFEQ and IFNE are already done)
 - branch-displacement-bits will behave badly in some unusual situations.
   It's ugly and needs to be cleaned up.
-- requires that the file end with a newline, and there is no warning
-  that the last line is ignored.
 
 
 KNOWN MAJOR INCOMPATIBILITIES WITH DEVPAC

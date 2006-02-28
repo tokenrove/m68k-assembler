@@ -11,41 +11,40 @@
 
 
 (defun section-length (section)
-  #+nil
-  (unless (eq (section-name section) 'bss)
-    (assert (= (section-program-counter section)
-	       (file-position (section-object-stream section)))))
-  ;; XXX broken for ORG
+  ;; XXX broken for ORG; perhaps we should always defer org to the
+  ;; linker? -JS
   (section-program-counter section))
 
+
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (defun create-bss (name)
+    `(push (cons ,name (make-section :name ,name
+			:output-fn #'bss-output-fn
+			:object-stream nil
+			:relocations nil))
+      *sections*))
+  (defun create-stream-section (name stream)
+    `(push (cons ,name
+	    (make-section :name ,name
+	     :object-stream ,stream))
+      *sections*)))
 
 (defmacro with-sections (sections &body body)
   "Creates the sections named in the SECTIONS list, and executes BODY
 with *SECTIONS* bound to an alist containing the sections.  Except in
 the case of BSS, a temporary stream is created for the object file
 output to a given section."
-  (if sections
-      (if (eq (car sections) 'bss)
-	  `(progn
-	    (push (cons ,(car sections)
-		   (make-section :name ,(car sections)
-				 :output-fn #'bss-output-fn
-				 :object-stream nil
-				 :relocations nil))
-	     *sections*)
-	    (with-sections ,(cdr sections) ,@body))
-
-	  (let ((symbol-of-the-day (gensym)))
-	    `(osicat:with-temporary-file (,symbol-of-the-day
-					  :element-type '(unsigned-byte 8))
-	      (push (cons ,(car sections)
-		     (make-section :name ,(car sections)
-				   :object-stream ,symbol-of-the-day))
-	       *sections*)
-	      (with-sections ,(cdr sections) ,@body))))
-
-      `(progn ,@body)))
-
+  (cond ((null sections) `(progn ,@body))
+	((eq (car sections) 'bss)
+	 `(progn
+	   ,(create-bss sections)
+	   (with-sections ,(cdr sections) ,@body)))
+	(t
+	 (let ((symbol-of-the-day (gensym)))
+	   `(osicat:with-temporary-file (,symbol-of-the-day
+					 :element-type '(unsigned-byte 8))
+	     ,(create-stream-section (car sections) symbol-of-the-day)
+	     (with-sections ,(cdr sections) ,@body))))))
 
 (defmacro using-section ((section) &body body)
   "Binds various special variables (*PROGRAM-COUNTER*,

@@ -484,3 +484,6 @@
 ;;; stop using eval in the code generator.
 (defun if-eql-word-p (modifier a b)
   (if (eql modifier 'word) a b))
+
+(defun modifier-size-in-bits (modifier)
+  (ecase modifier (byte 8) (word 16) (long 32)))

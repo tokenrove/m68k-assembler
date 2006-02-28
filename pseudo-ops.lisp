@@ -100,7 +100,7 @@
 		    (unless modifier (setf modifier 'word))
 		    (dolist (x operands)
 		      (let ((data (absolute-value x modifier))
-			    (length (ecase modifier (byte 8) (word 16) (long 32))))
+			    (length (modifier-size-in-bits modifier)))
 			(when (consp data)
 			  (push (make-backpatch-item `((,length (absolute-value ,data ,modifier)))
 						     length)
@@ -129,9 +129,9 @@
 		    (handle-label-normally label)
 		    (unless modifier (setf modifier 'word))
 		    (assert (eql (car (first operands)) 'absolute))
-		    (assert (= (length operands) 1)) ; XXX probably not.
+		    (assert (= (length operands) 1))
 		    (let ((data (absolute-value (first operands) modifier))
-			  (length (ecase modifier (byte 8) (word 16) (long 32))))
+			  (length (modifier-size-in-bits modifier)))
 		      (unless (integerp data)
 			(error "~A: Need to be able to resolve DS immediately."
 			       *source-position*))
